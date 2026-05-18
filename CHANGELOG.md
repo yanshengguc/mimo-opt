@@ -57,13 +57,49 @@
 - `scopeguard` — 终端清理保护
 - `unicode-width` — Unicode 字符宽度计算
 
+### Phase 2：缓存优化 + 技能系统 + 双 API 认证
+
+**缓存命中率优化（P0 三项）**
+- `ChatRequest` 新增 `system: Option<Vec<SystemContent>>` 字段 + `CacheControl` / `SystemContent` 结构体
+- 固定 system prompt：MiMo 身份 + 输出格式 + 项目文件扫描（100 个文件，排除 .git/node_modules 等）+ 日期
+- `Usage` 新增 `cache_creation_input_tokens` / `cache_read_input_tokens`，SSE 事件解析提取
+- 对话前缀缓存断点：messages ≥ 4 时标记 message[3] 为 `cache_control: ephemeral`
+- 状态栏显示 `♻ XX%` 缓存命中率（绿色）
+- 日期变化时自动重建 system prompt，同日内复用缓存
+
+**请求层优化**
+- URL 预计算：`messages_url` 字段在 `new()` 时构建，不再每帧 `format!`
+- reqwest 连接池：`timeout=120s`、`pool_idle_timeout=90s`、`tcp_keepalive=60s`
+- `build_request()` 方法抽取，消除 `check_api` 和 `send_message_stream` 重复代码
+- `StreamResult::Done` 新增 `cache_creation_tokens` / `cache_read_tokens`（改 `u64`）
+
+**技能系统（新增）**
+- `Config` 新增 `skills: HashMap<String, String>`，配置文件定义 shell 命令映射
+- Ctrl+Enter 输入 `/命令名` 时执行对应 shell 命令（Windows: `cmd /C`，其他: `sh -c`）
+- 执行输出显示在对话区，然后自动发送给 MiMo 分析
+- 未知技能显示错误提示
+
+**双 API 认证（新增）**
+- `Config` 新增 `auth_type: String`（`anthropic` / `bearer`），默认 `anthropic`
+- `MiMoClient` 新增 `set_auth_headers()`：anthropic 用 `api-key` + `anthropic-version`，bearer 用 `Authorization: Bearer`
+- 首次运行提示展示两种 API 配置方案
+
+**工程质量**
+- 光标移动改用 `char.len_utf8()`，多字节字符不再 -1 panic
+- `#[allow(dead_code)]` 抑制 theme.rs 6 个颜色常量 + mod.rs `base_url`/`api_url` 警告
+- 编译通过，0 warnings
+
+**文档**
+- 创建 `README.md` — 项目介绍、功能对比、使用说明（含测试阶段提示 + QQ: 2391859666）
+- 创建 `OPTIMIZATION.md` — 完整优化路线图（12 项已完成 + 待做方向）
+- Git 初始化 → 推送到 https://github.com/yanshengguc/mimo-opt
+
 ---
 
 ## 下一步计划
 
 - [ ] 代码块语法高亮（syntect）
+- [ ] 技能系统增强（参数传递、内置默认技能、/help 列表）
 - [ ] 多会话 + 持久化
-- [ ] 项目上下文感知（@文件引用）
-- [ ] Shell 命令集成
-- [ ] 模型路由（flash/pro/auto）
-- [ ] 前缀缓存优化
+- [ ] Content enum 改造（为 MCP/工具调用铺路）
+- [ ] 桌面端迁移（Tauri）
