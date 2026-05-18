@@ -179,6 +179,3 @@ src/
 | MiMo API 适配 | ✅ Token Plan + 普通 API | 需手动配置 | 需平台支持 |
 | 成本追踪 | ✅ token + 费用 | 通常无 | 部分平台 |
 
-## License
-
-MIT
