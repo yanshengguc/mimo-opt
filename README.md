@@ -61,17 +61,28 @@ cargo build --release
 
 ## 快速开始
 
-### 1. 获取 API Key
+### 1. 下载
 
-前往 [小米 MiMo Token Plan 平台](https://platform.xiaomimimo.com/#/console/subscription) 获取密钥。
+前往 [Releases](https://github.com/yanshengguc/mimo-opt/releases) 下载对应平台的预编译版本：
 
-### 2. 构建
+| 平台 | 文件 | 说明 |
+|------|------|------|
+| Windows x64 | `mimo-opt-x86_64-pc-windows-msvc.zip` | 解压即用 |
+| Linux x64 | `mimo-opt-x86_64-unknown-linux-gnu.tar.gz` | `chmod +x` 后运行 |
+| macOS ARM | `mimo-opt-aarch64-apple-darwin.tar.gz` | M1/M2/M3 Mac |
+| macOS x64 | `mimo-opt-x86_64-apple-darwin.tar.gz` | Intel Mac |
+
+或从源码构建：
 
 ```bash
-git clone https://github.com/你的用户名/mimo-opt.git
+git clone https://github.com/yanshengguc/mimo-opt.git
 cd mimo-opt
 cargo build --release
 ```
+
+### 2. 获取 API Key
+
+前往 [小米 MiMo Token Plan 平台](https://platform.xiaomimimo.com/#/console/subscription) 获取密钥。也支持 [DeepSeek](https://platform.deepseek.com/)、OpenAI 等兼容 API。
 
 ### 3. 首次运行
 
@@ -146,6 +157,7 @@ MiMo-OPT 首次运行，请配置 API Key
 | `F2` | 切换会话 |
 | `Ctrl+F` | 搜索消息 |
 | `Ctrl+Y` | 复制最后一个代码块到剪贴板 |
+| `Ctrl+V` | 粘贴剪贴板内容 |
 | `↑/↓` | 浏览输入历史 |
 | `PageUp/PageDown` | 翻页浏览对话 |
 | `Ctrl+Home` | 回到对话底部 |
@@ -159,10 +171,13 @@ MiMo-OPT 首次运行，请配置 API Key
 | `/read <path>[:range]` | 读取文件注入上下文（如 `/read src/main.rs:10-50`） |
 | `/write <path>` | 提取对话中最后一个代码块写入文件 |
 | `/edit <path> <old> <new>` | 精确字符串替换 |
+| `/export [path]` | 导出会话为 Markdown（默认 `{session}.md`） |
 | `/clear` | 清空当前对话 |
 | `/skills` | 列出全部技能 |
 | `/addskill <name> <cmd>` | 添加技能 |
 | `/rmskill <name>` | 删除技能 |
+| `/model <name>` | 运行时切换模型（如 `/model mimo-v2.5`） |
+| `/provider <name>` | 切换 API 提供商预设（如 `/provider deepseek`） |
 | `/help` | 显示帮助 |
 | `/skill_name [args]` | 执行技能命令（如 `/lint --fix`） |
 

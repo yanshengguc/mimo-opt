@@ -8,7 +8,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::api::{CacheControl, ChatMessage, Content, MiMoClient, StreamResult, SystemContent};
 use crate::config::Config;
@@ -17,10 +17,14 @@ use crate::session::{Session, SessionInfo};
 use crate::ui;
 use crate::util::{now_secs, get_cwd};
 
+const MAX_MESSAGES: usize = 200;
+const MESSAGE_WARN_THRESHOLD: usize = 160; // 80% of MAX
+
 #[derive(Clone)]
 pub enum ConfirmAction {
     WriteFile { path: String, code: String, lang: String },
     EditFile { path: String, old: String, new: String },
+    SendMessage { message: String },
     ClearChat,
     Quit,
 }
@@ -45,6 +49,7 @@ pub struct AppState {
     pub total_cache_read_tokens: u64,
     pub total_cost: f64,
     pub error_message: Option<String>,
+    pub error_history: Vec<String>,
     pub should_quit: bool,
     pub api_ok: Option<bool>, // None=未检测, Some(true)=正常, Some(false)=异常
     pub api_error_detail: Option<String>,
@@ -73,6 +78,8 @@ pub struct AppState {
     // 会话
     pub session: Session,
     pub session_list: Vec<SessionInfo>,
+    // 取消机制
+    pub cancel_tx: Option<oneshot::Sender<()>>,
 }
 
 pub async fn run(config: Config) -> anyhow::Result<()> {
@@ -121,12 +128,13 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         generating: false,
         stream_buffer: String::new(),
         spinner_tick: 0,
-        total_input_tokens: 0,
-        total_output_tokens: 0,
-        total_cache_creation_tokens: 0,
-        total_cache_read_tokens: 0,
-        total_cost: 0.0,
+        total_input_tokens: session.total_input_tokens,
+        total_output_tokens: session.total_output_tokens,
+        total_cache_creation_tokens: session.total_cache_creation_tokens,
+        total_cache_read_tokens: session.total_cache_read_tokens,
+        total_cost: session.total_cost,
         error_message: None,
+        error_history: Vec::new(),
         should_quit: false,
         api_ok: None,
         api_error_detail: None,
@@ -147,24 +155,16 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         copy_status: None,
         session,
         session_list,
+        cancel_tx: None,
     };
 
     // 构建初始 system prompt（静态，不含日期）
-    state.system_prompt_text = build_system_prompt_text(&state.project_tree);
+    state.system_prompt_text = build_system_prompt_text(&state.project_tree, &state.config.provider);
 
     // token 流 channel
-    let (token_tx, mut token_rx) = mpsc::unbounded_channel::<StreamResult>();
+    let (token_tx, mut token_rx) = mpsc::channel::<StreamResult>(256);
 
-    // 启动时探测 API（发一个极短请求）
-    match client.check_api().await {
-        Ok(()) => {
-            state.api_ok = Some(true);
-        }
-        Err(e) => {
-            state.api_ok = Some(false);
-            state.api_error_detail = Some(e.to_string());
-        }
-    }
+    // api_ok = None（首条消息自然检测 API，省去启动探测配额）
 
     let result = run_loop(&mut terminal, &mut state, &client, &token_tx, &mut token_rx).await;
 
@@ -179,8 +179,8 @@ async fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     state: &mut AppState,
     client: &Arc<MiMoClient>,
-    token_tx: &mpsc::UnboundedSender<StreamResult>,
-    token_rx: &mut mpsc::UnboundedReceiver<StreamResult>,
+    token_tx: &mpsc::Sender<StreamResult>,
+    token_rx: &mut mpsc::Receiver<StreamResult>,
 ) -> anyhow::Result<()> {
     loop {
         terminal.draw(|f| ui::draw(f, state))?;
@@ -198,6 +198,7 @@ async fn run_loop(
                     cache_read_tokens,
                 } => {
                     state.generating = false;
+                    state.cancel_tx = None;
                     if !state.stream_buffer.is_empty() {
                         state.messages.push(ChatMessage {
                             role: "assistant".to_string(),
@@ -209,20 +210,20 @@ async fn run_loop(
                     state.total_output_tokens += output_tokens;
                     state.total_cache_creation_tokens += cache_creation_tokens;
                     state.total_cache_read_tokens += cache_read_tokens;
-                    state.total_cost =
-                        calculate_cost(state.total_input_tokens, state.total_output_tokens);
+                    state.total_cost = calculate_cost(state);
                     state.stream_buffer.clear();
                     state.chat_scroll = 0; // 新消息到达，回到底部
                     state.api_ok = Some(true);
                     state.api_error_detail = None;
 
                     // 自动保存会话（每 5 条消息）
-                    if state.messages.len() % 5 == 0 {
+                    if state.messages.len().is_multiple_of(5) {
                         save_session(state);
                     }
                 }
                 StreamResult::Error(err) => {
                     state.generating = false;
+                    state.cancel_tx = None;
                     if !state.stream_buffer.is_empty() {
                         state.messages.push(ChatMessage {
                             role: "assistant".to_string(),
@@ -232,6 +233,8 @@ async fn run_loop(
                         state.stream_buffer.clear();
                     }
                     state.error_message = Some(err.clone());
+                    state.error_history.push(err.clone());
+                    if state.error_history.len() > 20 { state.error_history.remove(0); }
                     state.api_ok = Some(false);
                     state.api_error_detail = Some(err);
                     state.chat_scroll = 0;
@@ -257,10 +260,22 @@ async fn run_loop(
                         execute_confirm(state, client, token_tx);
                     }
                     KeyCode::Char('n') if state.pending_confirm.is_some() && !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        if let Some(ref c) = state.pending_confirm {
+                            if let ConfirmAction::SendMessage { ref message } = c.action {
+                                state.input = message.clone();
+                                state.cursor_pos = state.input.len();
+                            }
+                        }
                         state.pending_confirm = None;
                         push_cancelled_message(state);
                     }
                     KeyCode::Esc if state.pending_confirm.is_some() => {
+                        if let Some(ref c) = state.pending_confirm {
+                            if let ConfirmAction::SendMessage { ref message } = c.action {
+                                state.input = message.clone();
+                                state.cursor_pos = state.input.len();
+                            }
+                        }
                         state.pending_confirm = None;
                         push_cancelled_message(state);
                     }
@@ -297,14 +312,14 @@ async fn run_loop(
                             let next_id = state.session_list[next_idx].id.clone();
                             if let Ok(s) = Session::load(&next_id) {
                                 state.messages = s.messages.clone();
+                                state.total_input_tokens = s.total_input_tokens;
+                                state.total_output_tokens = s.total_output_tokens;
+                                state.total_cache_creation_tokens = s.total_cache_creation_tokens;
+                                state.total_cache_read_tokens = s.total_cache_read_tokens;
+                                state.total_cost = s.total_cost;
                                 state.session = s;
                                 state.stream_buffer.clear();
                                 state.chat_scroll = 0;
-                                state.total_input_tokens = 0;
-                                state.total_output_tokens = 0;
-                                state.total_cache_creation_tokens = 0;
-                                state.total_cache_read_tokens = 0;
-                                state.total_cost = 0.0;
                             }
                         }
                     }
@@ -321,8 +336,12 @@ async fn run_loop(
                         }
                     }
                     // Ctrl+C: 中断生成（不退出）
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) && state.pending_confirm.is_none() => {
-                        if state.generating {
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) && state.pending_confirm.is_none()
+                        && state.generating => {
+                            // 发送取消信号
+                            if let Some(cancel_tx) = state.cancel_tx.take() {
+                                let _ = cancel_tx.send(());
+                            }
                             state.generating = false;
                             if !state.stream_buffer.is_empty() {
                                 state.messages.push(ChatMessage {
@@ -333,16 +352,28 @@ async fn run_loop(
                                 state.stream_buffer.clear();
                             }
                         }
+                    // Ctrl+V: 粘贴剪贴板内容
+                    KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) && !state.generating && !state.search_active && state.pending_confirm.is_none() => {
+                        match cli_clipboard::get_contents() {
+                            Ok(text) => {
+                                // 插入到光标位置
+                                state.input.insert_str(state.cursor_pos, &text);
+                                state.cursor_pos += text.len();
+                                update_hint_lines(state);
+                            }
+                            Err(e) => {
+                                state.error_message = Some(format!("粘贴失败: {}", e));
+                            }
+                        }
                     }
                     // Ctrl+F: 搜索模式
-                    KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) && state.pending_confirm.is_none() => {
-                        if !state.generating && !state.search_active {
+                    KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) && state.pending_confirm.is_none()
+                        && !state.generating && !state.search_active => {
                             state.search_active = true;
                             state.search_query.clear();
                             state.search_matches.clear();
                             state.search_match_idx = 0;
                         }
-                    }
                     // Ctrl+Y: 复制最后一个代码块到剪贴板
                     KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) && state.pending_confirm.is_none() => {
                         collect_code_blocks(state);
@@ -366,6 +397,9 @@ async fn run_loop(
                         state.search_matches.clear();
                     }
                     KeyCode::Esc if state.generating => {
+                        if let Some(cancel_tx) = state.cancel_tx.take() {
+                            let _ = cancel_tx.send(());
+                        }
                         state.generating = false;
                         if !state.stream_buffer.is_empty() {
                             state.messages.push(ChatMessage {
@@ -385,8 +419,8 @@ async fn run_loop(
                         state.search_query.pop();
                         do_search(state);
                     }
-                    KeyCode::Enter if state.search_active => {
-                        if !state.search_matches.is_empty() {
+                    KeyCode::Enter if state.search_active
+                        && !state.search_matches.is_empty() => {
                             if key.modifiers.contains(KeyModifiers::SHIFT) {
                                 if state.search_match_idx > 0 {
                                     state.search_match_idx -= 1;
@@ -397,7 +431,6 @@ async fn run_loop(
                                 state.search_match_idx = (state.search_match_idx + 1) % state.search_matches.len();
                             }
                         }
-                    }
                     // PageUp/PageDown: 聊天区滚动
                     KeyCode::PageUp if !state.generating && !state.search_active => {
                         state.chat_scroll = state.chat_scroll.saturating_add(10);
@@ -409,8 +442,19 @@ async fn run_loop(
                         state.chat_scroll = 0;
                     }
                     // Ctrl+Enter: 发送消息或执行技能
-                    KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) && state.pending_confirm.is_none() => {
-                        if !state.input.is_empty() && !state.generating {
+                    KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) && state.pending_confirm.is_none()
+                        && !state.input.is_empty() && !state.generating => {
+                            // 长消息发送确认（>5 行）
+                            if !state.input.starts_with('/') && state.input.lines().count() > 5 {
+                                let msg = state.input.clone();
+                                state.pending_confirm = Some(ConfirmState {
+                                    action: ConfirmAction::SendMessage { message: msg },
+                                    detail: format!("{} 行消息，确认发送？", state.input.lines().count()),
+                                });
+                                state.input.clear();
+                                state.cursor_pos = 0;
+                                break;
+                            }
                             let user_msg = state.input.clone();
                             state.input.clear();
                             state.cursor_pos = 0;
@@ -420,16 +464,16 @@ async fn run_loop(
                             state.history_idx = None;
                             state.input_draft.clear();
 
-                            if user_msg.starts_with('/') {
+                            if let Some(stripped) = user_msg.strip_prefix('/') {
                                 // 技能执行
-                                let after_slash = user_msg[1..].to_string();
+                                let after_slash = stripped.to_string();
                                 let mut parts_iter = after_slash.splitn(2, ' ');
                                 let skill_name = parts_iter.next().unwrap_or("").to_string();
                                 let args = parts_iter.next().unwrap_or("").to_string();
 
                                 // /help 列出全部技能
                                 if skill_name == "help" {
-                                    let mut help_text = String::from("可用命令:\n  /read <path>[:start[-end]]  读取文件\n  /write <path>              写入最近代码块（需确认）\n  /edit <path> <old> <new>    编辑文件（需确认）\n  /clear                     清空对话（需确认）\n  /skills                    查看技能列表\n  /addskill <name> <cmd>     添加技能\n  /rmskill <name>            删除技能\n\n技能:\n");
+                                    let mut help_text = String::from("可用命令:\n  /read <path>[:start[-end]]  读取文件\n  /write <path>              写入最近代码块（需确认）\n  /edit <path> <old> <new>    编辑文件（需确认）\n  /export [path]             导出会话为 Markdown\n  /clear                     清空对话（需确认）\n  /model <name>              切换模型\n  /provider <name>           切换 API 提供商\n  /skills                    查看技能列表\n  /addskill <name> <cmd>     添加技能\n  /rmskill <name>            删除技能\n  /errors                    查看错误历史\n\n技能:\n");
                                     let mut names: Vec<&String> = state.skills.keys().collect();
                                     names.sort();
                                     for name in &names {
@@ -442,16 +486,36 @@ async fn run_loop(
                                         cache_control: None,
                                     });
                                 } else if skill_name == "read" {
-                                    handle_read_command(state, &args, &client, &token_tx);
+                                    handle_read_command(state, &args, client, token_tx);
                                 } else if skill_name == "write" {
-                                    handle_write_command(state, &args, &client, &token_tx);
+                                    handle_write_command(state, &args, client, token_tx);
                                 } else if skill_name == "edit" {
-                                    handle_edit_command(state, &args, &client, &token_tx);
+                                    handle_edit_command(state, &args, client, token_tx);
                                 } else if skill_name == "clear" {
                                     if !state.messages.is_empty() {
                                         state.pending_confirm = Some(ConfirmState {
                                             action: ConfirmAction::ClearChat,
                                             detail: format!("清空 {} 条对话（不可恢复）", state.messages.len()),
+                                        });
+                                    }
+                                } else if skill_name == "export" {
+                                    handle_export_command(state, &args);
+                                } else if skill_name == "errors" {
+                                    if state.error_history.is_empty() {
+                                        state.messages.push(ChatMessage {
+                                            role: "assistant".to_string(),
+                                            content: Content::text("无错误记录".to_string()),
+                                            cache_control: None,
+                                        });
+                                    } else {
+                                        let mut text = format!("最近 {} 条错误:\n", state.error_history.len());
+                                        for (i, err) in state.error_history.iter().enumerate() {
+                                            text.push_str(&format!("  {}. {}\n", i + 1, err));
+                                        }
+                                        state.messages.push(ChatMessage {
+                                            role: "assistant".to_string(),
+                                            content: Content::text(text),
+                                            cache_control: None,
                                         });
                                     }
                                 } else if skill_name == "skills" {
@@ -509,12 +573,74 @@ async fn run_loop(
                                     } else {
                                         state.error_message = Some(format!("技能 /{} 不存在", args));
                                     }
+                                } else if skill_name == "model" {
+                                    if args.is_empty() {
+                                        state.error_message = Some("用法: /model <model_name>".into());
+                                    } else {
+                                        let new_model = args.clone();
+                                        state.config.model = new_model.clone();
+                                        client.set_model(new_model.clone());
+                                        state.config.save().ok();
+                                        state.messages.push(ChatMessage {
+                                            role: "assistant".to_string(),
+                                            content: Content::text(format!(
+                                                "✓ 模型已切换为 {}", new_model
+                                            )),
+                                            cache_control: None,
+                                        });
+                                    }
+                                } else if skill_name == "provider" {
+                                    if args.is_empty() {
+                                        let mut list = String::from("可用 provider 预设:\n");
+                                        for p in crate::config::PROVIDERS {
+                                            list.push_str(&format!(
+                                                "  {} — {} ({})\n",
+                                                p.name, p.model, p.base_url
+                                            ));
+                                        }
+                                        list.push_str("\n用法: /provider <name>");
+                                        state.messages.push(ChatMessage {
+                                            role: "assistant".to_string(),
+                                            content: Content::text(list),
+                                            cache_control: None,
+                                        });
+                                    } else if let Some(preset) = crate::config::Config::find_preset(&args) {
+                                        let api_key = state.config.api_key.clone();
+                                        state.config.provider = preset.name.to_string();
+                                        state.config.base_url = preset.base_url.to_string();
+                                        state.config.model = preset.model.to_string();
+                                        state.config.auth_type = preset.auth_type.to_string();
+                                        state.config.api_format = preset.api_format.to_string();
+                                        client.update_for_provider(preset, api_key);
+                                        // 重建 system prompt（不同 provider 有不同 AI 身份）
+                                        state.system_prompt_text =
+                                            build_system_prompt_text(&state.project_tree, &state.config.provider);
+                                        state.config.save().ok();
+                                        state.messages.push(ChatMessage {
+                                            role: "assistant".to_string(),
+                                            content: Content::text(format!(
+                                                "✓ 已切换到 {} ({})\nbase_url: {}\nmodel: {}",
+                                                preset.name, preset.model, preset.base_url, state.config.model
+                                            )),
+                                            cache_control: None,
+                                        });
+                                    } else {
+                                        state.error_message = Some(format!(
+                                            "未知 provider: {}。可用: {}",
+                                            args,
+                                            crate::config::PROVIDERS
+                                                .iter()
+                                                .map(|p| p.name)
+                                                .collect::<Vec<_>>()
+                                                .join(", ")
+                                        ));
+                                    }
                                 } else if let Some(cmd_tpl) = state.skills.get(&skill_name).cloned() {
-                                    // 参数替换
+                                    // 参数替换（args 做 shell 转义防注入）
                                     let cmd = if cmd_tpl.contains("{args}") {
-                                        cmd_tpl.replace("{args}", &args)
+                                        cmd_tpl.replace("{args}", &shell_escape(&args))
                                     } else if !args.is_empty() {
-                                        format!("{} {}", cmd_tpl, args)
+                                        format!("{} {}", cmd_tpl, shell_escape(&args))
                                     } else {
                                         cmd_tpl
                                     };
@@ -528,6 +654,8 @@ async fn run_loop(
                                     let messages_clone = state.messages.clone();
                                     let system_text = state.system_prompt_text.clone();
                                     let skill_name_owned = skill_name.clone();
+                                    let (cancel_tx, cancel_rx) = oneshot::channel();
+                                    state.cancel_tx = Some(cancel_tx);
 
                                     tokio::spawn(async move {
                                         let shell = if cfg!(target_os = "windows") {
@@ -583,7 +711,7 @@ async fn run_loop(
                                                     elapsed.as_millis(),
                                                     result
                                                 );
-                                                let _ = tx.send(StreamResult::Token(display));
+                                                let _ = tx.send(StreamResult::Token(display)).await;
 
                                                 // 用技能输出作为用户消息，发送给 MiMo 分析
                                                 let mut msgs = messages_clone;
@@ -599,23 +727,24 @@ async fn run_loop(
                                                 let system_content =
                                                     build_system_content(&system_text);
 
-                                                let result = client
-                                                    .send_message_stream(
+                                                tokio::select! {
+                                                    r = client.send_message_stream(
                                                         &system_content,
                                                         &msgs,
                                                         tx.clone(),
-                                                    )
-                                                    .await;
-                                                if let Err(e) = result {
-                                                    let _ =
-                                                        tx.send(StreamResult::Error(e.to_string()));
+                                                    ) => {
+                                                        if let Err(e) = r {
+                                                            let _ = tx.send(StreamResult::Error(e.to_string())).await;
+                                                        }
+                                                    }
+                                                    _ = cancel_rx => {}
                                                 }
                                             }
                                             Err(e) => {
                                                 let _ = tx.send(StreamResult::Error(format!(
                                                     "/{} 执行失败: {}",
                                                     skill_name_owned, e
-                                                )));
+                                                ))).await;
                                             }
                                         }
                                     });
@@ -631,41 +760,54 @@ async fn run_loop(
                                     cache_control: None,
                                 });
 
+                                // 长对话自动截断
+                                maybe_truncate_messages(state);
+                                if state.messages.len() >= MESSAGE_WARN_THRESHOLD {
+                                    state.error_message = Some(format!(
+                                        "消息数 {}/{}，接近上限",
+                                        state.messages.len(),
+                                        MAX_MESSAGES
+                                    ));
+                                }
+
                                 state.generating = true;
                                 state.stream_buffer.clear();
                                 state.spinner_tick = 0;
 
-                                // 首条消息注入日期（替代原来写在 system prompt 的做法）
-                                if state.messages.len() == 1 {
-                                    let today = chrono_date();
-                                    state.messages[0].content.as_mut_str().push_str(
-                                        &format!("\n\n[Current date: {}]", today)
-                                    );
+                                // 首条 user 消息注入日期
+                                if let Some(first) = state.messages.first() {
+                                    if first.role == "user" && !first.content.as_str().contains("[Current date:") {
+                                        let today = chrono_date();
+                                        state.messages[0].content.as_mut_str().push_str(
+                                            &format!("\n\n[Current date: {}]", today)
+                                        );
+                                    }
                                 }
 
                                 let system_text = state.system_prompt_text.clone();
 
-                                // 构建带缓存断点的消息列表
                                 let mut messages = state.messages.clone();
                                 apply_cache_breakpoints(&mut messages);
 
-                                // 构建 system prompt
                                 let system_content = build_system_content(&system_text);
 
                                 let client = Arc::clone(client);
                                 let tx = token_tx.clone();
+                                let (cancel_tx, cancel_rx) = oneshot::channel();
+                                state.cancel_tx = Some(cancel_tx);
 
                                 tokio::spawn(async move {
-                                    let result = client
-                                        .send_message_stream(&system_content, &messages, tx.clone())
-                                        .await;
-                                    if let Err(e) = result {
-                                        let _ = tx.send(StreamResult::Error(e.to_string()));
+                                    tokio::select! {
+                                        result = client.send_message_stream(&system_content, &messages, tx.clone()) => {
+                                            if let Err(e) = result {
+                                                let _ = tx.send(StreamResult::Error(e.to_string())).await;
+                                            }
+                                        }
+                                        _ = cancel_rx => {}
                                     }
                                 });
                             }
                         }
-                    }
                     // 输入字符（非搜索模式、非确认状态）
                     KeyCode::Char(ch) if !state.generating && !state.search_active && state.pending_confirm.is_none() && !key.modifiers.contains(KeyModifiers::CONTROL) => {
                         state.input.insert(state.cursor_pos, ch);
@@ -673,8 +815,8 @@ async fn run_loop(
                         update_hint_lines(state);
                     }
                     // 退格
-                    KeyCode::Backspace if !state.generating && !state.search_active => {
-                        if state.cursor_pos > 0 {
+                    KeyCode::Backspace if !state.generating && !state.search_active
+                        && state.cursor_pos > 0 => {
                             let prev = state.input[..state.cursor_pos]
                                 .chars()
                                 .next_back()
@@ -684,14 +826,12 @@ async fn run_loop(
                             state.cursor_pos = prev;
                             update_hint_lines(state);
                         }
-                    }
                     // Delete
-                    KeyCode::Delete if !state.generating && !state.search_active => {
-                        if state.cursor_pos < state.input.len() {
+                    KeyCode::Delete if !state.generating && !state.search_active
+                        && state.cursor_pos < state.input.len() => {
                             state.input.remove(state.cursor_pos);
                             update_hint_lines(state);
                         }
-                    }
                     // Ctrl+A
                     KeyCode::Char('a')
                         if key.modifiers.contains(KeyModifiers::CONTROL)
@@ -710,8 +850,8 @@ async fn run_loop(
                         state.cursor_pos = state.input.len();
                     }
                     // 上箭头 — 浏览输入历史
-                    KeyCode::Up if !state.generating => {
-                        if !state.input_history.is_empty() {
+                    KeyCode::Up if !state.generating
+                        && !state.input_history.is_empty() => {
                             match state.history_idx {
                                 None => {
                                     state.input_draft = state.input.clone();
@@ -728,7 +868,6 @@ async fn run_loop(
                             }
                             update_hint_lines(state);
                         }
-                    }
                     // 下箭头 — 前进到更新的历史
                     KeyCode::Down if !state.generating => {
                         if let Some(idx) = state.history_idx {
@@ -744,8 +883,8 @@ async fn run_loop(
                         }
                     }
                     // 左箭头
-                    KeyCode::Left if !state.generating => {
-                        if state.cursor_pos > 0 {
+                    KeyCode::Left if !state.generating
+                        && state.cursor_pos > 0 => {
                             let prev = state.input[..state.cursor_pos]
                                 .chars()
                                 .next_back()
@@ -753,10 +892,9 @@ async fn run_loop(
                                 .unwrap_or(0);
                             state.cursor_pos = prev;
                         }
-                    }
                     // 右箭头
-                    KeyCode::Right if !state.generating => {
-                        if state.cursor_pos < state.input.len() {
+                    KeyCode::Right if !state.generating
+                        && state.cursor_pos < state.input.len() => {
                             let next = state.input[state.cursor_pos..]
                                 .chars()
                                 .next()
@@ -764,7 +902,6 @@ async fn run_loop(
                                 .unwrap_or(state.input.len());
                             state.cursor_pos = next;
                         }
-                    }
                     _ => {}
                 }
             }
@@ -783,10 +920,34 @@ async fn run_loop(
     Ok(())
 }
 
-/// 保存当前会话（消息 + 时间戳）
+/// 检查消息数是否超限，自动截断最早的消息对（保留最近 150 条）
+fn maybe_truncate_messages(state: &mut AppState) {
+    if state.messages.len() > MAX_MESSAGES {
+        let excess = state.messages.len() - 150; // 保留最近 150 条
+        if excess > 0 {
+            state.messages.drain(0..excess);
+            // 重新注入日期到新的第一条消息
+            if let Some(first) = state.messages.first_mut() {
+                if !first.content.as_str().contains("[Current date:") {
+                    let today = chrono_date();
+                    first.content.as_mut_str().push_str(
+                        &format!("\n\n[Current date: {}]", today)
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// 保存当前会话（消息 + 时间戳 + token 统计）
 fn save_session(state: &mut AppState) {
     state.session.messages = state.messages.clone();
     state.session.updated_at = now_secs();
+    state.session.total_input_tokens = state.total_input_tokens;
+    state.session.total_output_tokens = state.total_output_tokens;
+    state.session.total_cache_creation_tokens = state.total_cache_creation_tokens;
+    state.session.total_cache_read_tokens = state.total_cache_read_tokens;
+    state.session.total_cost = state.total_cost;
     let _ = state.session.save();
 }
 
@@ -799,10 +960,9 @@ fn push_cancelled_message(state: &mut AppState) {
     });
 }
 
-fn calculate_cost(input_tokens: u64, output_tokens: u64) -> f64 {
-    // MiMo Token Plan 粗略费率（具体以官方为准）
-    let input_cost = input_tokens as f64 / 1_000_000.0 * 2.0; // ¥2/百万 input tokens
-    let output_cost = output_tokens as f64 / 1_000_000.0 * 8.0; // ¥8/百万 output tokens
+fn calculate_cost(state: &AppState) -> f64 {
+    let input_cost = state.total_input_tokens as f64 / 1_000_000.0 * state.config.input_price();
+    let output_cost = state.total_output_tokens as f64 / 1_000_000.0 * state.config.output_price();
     input_cost + output_cost
 }
 
@@ -842,13 +1002,25 @@ fn chrono_from_days(days: u64) -> (u64, u64, u64) {
 }
 
 fn is_leap(year: u64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
-fn build_system_prompt_text(project_tree: &str) -> String {
+fn build_system_prompt_text(project_tree: &str, provider: &str) -> String {
     let mut text = String::with_capacity(512);
-    text.push_str("You are MiMo, a helpful AI assistant created by Xiaomi's LLM-Core team. ");
-    text.push_str("You can help with coding, analysis, writing, math, and general Q&A.\n\n");
+    match provider {
+        "deepseek" => {
+            text.push_str("You are DeepSeek, a helpful AI assistant created by DeepSeek. ");
+            text.push_str("You can help with coding, analysis, writing, math, and general Q&A.\n\n");
+        }
+        "openai" => {
+            text.push_str("You are ChatGPT, a helpful AI assistant created by OpenAI. ");
+            text.push_str("You can help with coding, analysis, writing, math, and general Q&A.\n\n");
+        }
+        _ => {
+            text.push_str("You are MiMo, a helpful AI assistant created by Xiaomi's LLM-Core team. ");
+            text.push_str("You can help with coding, analysis, writing, math, and general Q&A.\n\n");
+        }
+    }
     text.push_str("## Output Format\n");
     text.push_str("- Use markdown for formatting\n");
     text.push_str("- Use code blocks with language tags for code\n");
@@ -881,10 +1053,12 @@ fn apply_cache_breakpoints(messages: &mut [ChatMessage]) {
     if n == 0 {
         return;
     }
+    // 断点 1：第一条消息，保护 system prompt + 首轮对话
     messages[0].cache_control = Some(CacheControl {
         cache_type: "ephemeral".to_string(),
     });
-    for i in (3..n).step_by(6) {
+    // 断点 2-4：每 5 条追加，Anthropic 单次请求最多 4 个 cache_control 标记
+    for i in (3..n).step_by(5).take(3) {
         messages[i].cache_control = Some(CacheControl {
             cache_type: "ephemeral".to_string(),
         });
@@ -900,7 +1074,7 @@ fn update_hint_lines(state: &mut AppState) {
             let mut hints: Vec<String> = Vec::new();
 
             // 内置命令
-            for cmd in &["read", "write", "edit", "clear", "skills", "addskill", "rmskill", "help"] {
+            for cmd in &["read", "write", "edit", "clear", "model", "provider", "skills", "addskill", "rmskill", "help"] {
                 if cmd.starts_with(&prefix) && *cmd != prefix {
                     hints.push(format!("/{}", cmd));
                 }
@@ -938,6 +1112,14 @@ fn do_search(state: &mut AppState) {
 
 fn collect_code_blocks(state: &mut AppState) {
     state.code_blocks.clear();
+
+    // 也扫描 stream_buffer 中的代码块（生成中的代码 Ctrl+Y 可复制）
+    if !state.stream_buffer.is_empty() {
+        for (lang, content) in extract_code_blocks_from_text(&state.stream_buffer) {
+            state.code_blocks.push((lang, content));
+        }
+    }
+
     for msg in &state.messages {
         let text = msg.content.as_str();
         let mut in_block = false;
@@ -945,7 +1127,7 @@ fn collect_code_blocks(state: &mut AppState) {
         let mut lines: Vec<String> = Vec::new();
         for line in text.lines() {
             let trimmed = line.trim_start();
-            if trimmed.starts_with("```") {
+            if let Some(stripped) = trimmed.strip_prefix("```") {
                 if in_block {
                     let l = if lang.is_empty() { "text".into() } else { lang.clone() };
                     state.code_blocks.push((l, lines.join("\n")));
@@ -953,7 +1135,7 @@ fn collect_code_blocks(state: &mut AppState) {
                     lines.clear();
                 } else {
                     in_block = true;
-                    lang = trimmed[3..].to_string();
+                    lang = stripped.to_string();
                     lines.clear();
                 }
             } else if in_block {
@@ -967,13 +1149,62 @@ fn collect_code_blocks(state: &mut AppState) {
     }
 }
 
+// ── 导出命令 ──
+
+fn handle_export_command(state: &mut AppState, args: &str) {
+    if state.messages.is_empty() {
+        state.error_message = Some("对话为空，无法导出".to_string());
+        return;
+    }
+    let path = if args.is_empty() {
+        format!("{}.md", state.session.name)
+    } else {
+        args.to_string()
+    };
+    let mut md = String::new();
+    md.push_str(&format!("# MiMo-OPT 会话: {}\n", state.session.name));
+    md.push_str(&format!("> 模型: {} | Token: ↓{} ↑{} | ￥{:.4}\n\n",
+        state.config.model,
+        state.total_input_tokens,
+        state.total_output_tokens,
+        state.total_cost,
+    ));
+    md.push_str("---\n\n");
+    for msg in &state.messages {
+        match msg.role.as_str() {
+            "user" => {
+                md.push_str("## User\n\n");
+                md.push_str(msg.content.as_str());
+                md.push_str("\n\n");
+            }
+            _ => {
+                md.push_str(&format!("## {}\n\n", state.config.model));
+                md.push_str(msg.content.as_str());
+                md.push_str("\n\n");
+            }
+        }
+    }
+    match std::fs::write(&path, &md) {
+        Ok(()) => {
+            state.messages.push(ChatMessage {
+                role: "assistant".to_string(),
+                content: Content::text(format!("✓ 已导出到 {} ({} 条消息, {} B)", path, state.messages.len(), md.len())),
+                cache_control: None,
+            });
+        }
+        Err(e) => {
+            state.error_message = Some(format!("/export: {}", e));
+        }
+    }
+}
+
 // ── 文件操作命令 ──
 
 fn handle_read_command(
     state: &mut AppState,
     args: &str,
     client: &Arc<MiMoClient>,
-    token_tx: &mpsc::UnboundedSender<StreamResult>,
+    token_tx: &mpsc::Sender<StreamResult>,
 ) {
     if args.is_empty() {
         state.error_message = Some("用法: /read <path>[:start[-end]]".into());
@@ -993,17 +1224,30 @@ fn handle_read_command(
         let before = &args[..idx];
         let after = &args[idx + 1..];
         if before.contains('/') || before.contains('\\') {
-            // 路径中的冒号（如 Windows 盘符 C:），不拆分
             (args.to_string(), None)
         } else if let Some(dash_idx) = after.find('-') {
-            let start: usize = after[..dash_idx].parse().unwrap_or(0);
-            let end: usize = after[dash_idx + 1..].parse().unwrap_or(0);
-            if start > 0 && end >= start {
-                (before.to_string(), Some((start, end)))
-            } else {
-                (before.to_string(), None)
-            }
+            let start_str = &after[..dash_idx];
+            let end_str = &after[dash_idx + 1..];
+            let start: usize = match start_str.parse() {
+                Ok(v) if v > 0 => v,
+                _ => {
+                    state.error_message = Some(format!("/read: 无效起始行号 '{}'", start_str));
+                    return;
+                }
+            };
+            let end: usize = match end_str.parse() {
+                Ok(v) if v >= start => v,
+                _ => {
+                    state.error_message = Some(format!("/read: 无效结束行号 '{}'", end_str));
+                    return;
+                }
+            };
+            (before.to_string(), Some((start, end)))
         } else if let Ok(line_num) = after.parse::<usize>() {
+            if line_num == 0 {
+                state.error_message = Some("/read: 行号必须大于0".to_string());
+                return;
+            }
             (before.to_string(), Some((line_num, line_num)))
         } else {
             (args.to_string(), None)
@@ -1052,7 +1296,7 @@ fn handle_write_command(
     state: &mut AppState,
     args: &str,
     _client: &Arc<MiMoClient>,
-    _token_tx: &mpsc::UnboundedSender<StreamResult>,
+    _token_tx: &mpsc::Sender<StreamResult>,
 ) {
     if args.is_empty() {
         state.error_message = Some("用法: /write <path>".into());
@@ -1104,7 +1348,7 @@ fn handle_edit_command(
     state: &mut AppState,
     args: &str,
     _client: &Arc<MiMoClient>,
-    _token_tx: &mpsc::UnboundedSender<StreamResult>,
+    _token_tx: &mpsc::Sender<StreamResult>,
 ) {
     // 格式: /edit <path> <old> <new>
     let parts: Vec<&str> = args.splitn(3, ' ').collect();
@@ -1163,7 +1407,7 @@ fn handle_edit_command(
 fn execute_confirm(
     state: &mut AppState,
     client: &Arc<MiMoClient>,
-    token_tx: &mpsc::UnboundedSender<StreamResult>,
+    token_tx: &mpsc::Sender<StreamResult>,
 ) {
     let confirm = match state.pending_confirm.take() {
         Some(c) => c,
@@ -1239,6 +1483,43 @@ fn execute_confirm(
                 }
             }
         }
+        ConfirmAction::SendMessage { message } => {
+            state.messages.push(ChatMessage {
+                role: "user".to_string(),
+                content: Content::text(message),
+                cache_control: None,
+            });
+            maybe_truncate_messages(state);
+            state.generating = true;
+            state.stream_buffer.clear();
+            state.spinner_tick = 0;
+            if let Some(first) = state.messages.first() {
+                if first.role == "user" && !first.content.as_str().contains("[Current date:") {
+                    let today = chrono_date();
+                    state.messages[0].content.as_mut_str().push_str(
+                        &format!("\n\n[Current date: {}]", today)
+                    );
+                }
+            }
+            let system_text = state.system_prompt_text.clone();
+            let mut messages = state.messages.clone();
+            apply_cache_breakpoints(&mut messages);
+            let system_content = build_system_content(&system_text);
+            let client = Arc::clone(client);
+            let tx = token_tx.clone();
+            let (cancel_tx, cancel_rx) = oneshot::channel();
+            state.cancel_tx = Some(cancel_tx);
+            tokio::spawn(async move {
+                tokio::select! {
+                    result = client.send_message_stream(&system_content, &messages, tx.clone()) => {
+                        if let Err(e) = result {
+                            let _ = tx.send(StreamResult::Error(e.to_string())).await;
+                        }
+                    }
+                    _ = cancel_rx => {}
+                }
+            });
+        }
         ConfirmAction::ClearChat => {
             let count = state.messages.len();
             state.messages.clear();
@@ -1280,6 +1561,10 @@ fn show_confirm_detail(state: &mut AppState) {
                 format!("将清空 {} 条对话消息（不可恢复）", state.messages.len())
             }
             ConfirmAction::Quit => c.detail.clone(),
+            ConfirmAction::SendMessage { message } => {
+                let preview: String = message.lines().take(10).collect::<Vec<_>>().join("\n");
+                format!("{} 行消息:\n{}", message.lines().count(), preview)
+            }
         },
         None => return,
     };
@@ -1320,14 +1605,14 @@ fn extract_code_from_text(text: &str) -> Option<(String, String)> {
 
     for line in text.lines() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("```") {
+        if let Some(stripped) = trimmed.strip_prefix("```") {
             if in_block {
                 last_code = Some((current_lang.clone(), current_lines.clone()));
                 in_block = false;
                 current_lines.clear();
             } else {
                 in_block = true;
-                current_lang = trimmed[3..].to_string();
+                current_lang = stripped.to_string();
                 current_lines.clear();
             }
         } else if in_block {
@@ -1346,24 +1631,60 @@ fn extract_code_from_text(text: &str) -> Option<(String, String)> {
     })
 }
 
+/// 从文本中提取所有代码块（含未闭合的），返回 (lang, content) 列表
+fn extract_code_blocks_from_text(text: &str) -> Vec<(String, String)> {
+    let mut results = Vec::new();
+    let mut in_block = false;
+    let mut current_lang = String::new();
+    let mut current_lines: Vec<String> = Vec::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if let Some(stripped) = trimmed.strip_prefix("```") {
+            if in_block {
+                let l = if current_lang.is_empty() { "text".to_string() } else { current_lang.clone() };
+                results.push((l, current_lines.join("\n")));
+                in_block = false;
+                current_lines.clear();
+            } else {
+                in_block = true;
+                current_lang = stripped.to_string();
+                current_lines.clear();
+            }
+        } else if in_block {
+            current_lines.push(line.to_string());
+        }
+    }
+
+    // 处理未闭合的代码块
+    if in_block && !current_lines.is_empty() {
+        let l = if current_lang.is_empty() { "text".to_string() } else { current_lang };
+        results.push((l, current_lines.join("\n")));
+    }
+
+    results
+}
+
 /// 将内容发送给 MiMo 分析（共享逻辑）
 fn send_to_mimo(
     state: &mut AppState,
     client: &Arc<MiMoClient>,
-    token_tx: &mpsc::UnboundedSender<StreamResult>,
+    token_tx: &mpsc::Sender<StreamResult>,
     analysis_msg: String,
 ) {
     state.generating = true;
     state.stream_buffer.clear();
     state.spinner_tick = 0;
 
-    // 首条消息注入日期
-    if state.messages.len() == 1 {
-        let today = chrono_date();
-        state.messages[0]
-            .content
-            .as_mut_str()
-            .push_str(&format!("\n\n[Current date: {}]", today));
+    // 首条 user 消息注入日期（避免注入到 assistant 消息上）
+    if let Some(first) = state.messages.first() {
+        if first.role == "user" && !first.content.as_str().contains("[Current date:") {
+            let today = chrono_date();
+            state.messages[0]
+                .content
+                .as_mut_str()
+                .push_str(&format!("\n\n[Current date: {}]", today));
+        }
     }
 
     let mut msgs = state.messages.clone();
@@ -1372,6 +1693,13 @@ fn send_to_mimo(
         content: Content::text(analysis_msg),
         cache_control: None,
     });
+    // 消息数上限保护（与正常发送路径一致）
+    if msgs.len() > MAX_MESSAGES {
+        let excess = msgs.len() - 150;
+        if excess > 0 {
+            msgs.drain(0..excess);
+        }
+    }
     apply_cache_breakpoints(&mut msgs);
 
     let system_text = state.system_prompt_text.clone();
@@ -1379,15 +1707,41 @@ fn send_to_mimo(
 
     let client = Arc::clone(client);
     let tx = token_tx.clone();
+    let (cancel_tx, cancel_rx) = oneshot::channel();
+    state.cancel_tx = Some(cancel_tx);
 
     tokio::spawn(async move {
-        let result = client
-            .send_message_stream(&system_content, &msgs, tx.clone())
-            .await;
-        if let Err(e) = result {
-            let _ = tx.send(StreamResult::Error(e.to_string()));
+        tokio::select! {
+            result = client.send_message_stream(&system_content, &msgs, tx.clone()) => {
+                if let Err(e) = result {
+                    let _ = tx.send(StreamResult::Error(e.to_string())).await;
+                }
+            }
+            _ = cancel_rx => {}
         }
     });
+}
+
+/// Shell-escape user-provided args to prevent command injection via `{args}`.
+fn shell_escape(args: &str) -> String {
+    if cfg!(target_os = "windows") {
+        // cmd.exe: escape with ^ for special chars
+        let mut s = String::with_capacity(args.len() * 2);
+        for ch in args.chars() {
+            match ch {
+                '%' | '^' | '&' | '<' | '>' | '|' | '"' | '(' | ')' | '!' => {
+                    s.push('^');
+                    s.push(ch);
+                }
+                _ => s.push(ch),
+            }
+        }
+        s
+    } else {
+        // sh: wrap in single quotes, escape internal single quotes as '\''
+        let escaped = args.replace('\'', "'\\''");
+        format!("'{}'", escaped)
+    }
 }
 
 fn scan_project_tree() -> String {
@@ -1395,9 +1749,6 @@ fn scan_project_tree() -> String {
         Ok(p) => p,
         Err(_) => return String::new(),
     };
-
-    // 检查是否有 .git 目录（判断是否为 git 仓库）
-    let is_git_repo = cwd.join(".git").exists();
 
     // 默认排除的目录
     let default_excludes: &[&str] = &[
@@ -1408,7 +1759,7 @@ fn scan_project_tree() -> String {
     let mut entries: Vec<String> = Vec::new();
     let max_files = 100;
 
-    scan_dir_recursive(&cwd, &cwd, default_excludes, is_git_repo, &mut entries, max_files, 0);
+    scan_dir_recursive(&cwd, &cwd, default_excludes, &mut entries, max_files, 0);
 
     if entries.is_empty() {
         return String::new();
@@ -1422,7 +1773,6 @@ fn scan_dir_recursive(
     dir: &std::path::Path,
     base: &std::path::Path,
     excludes: &[&str],
-    is_git_repo: bool,
     entries: &mut Vec<String>,
     max_files: usize,
     depth: usize,
@@ -1472,6 +1822,6 @@ fn scan_dir_recursive(
         if entries.len() >= max_files {
             break;
         }
-        scan_dir_recursive(&subdir, base, excludes, is_git_repo, entries, max_files, depth + 1);
+        scan_dir_recursive(&subdir, base, excludes, entries, max_files, depth + 1);
     }
 }

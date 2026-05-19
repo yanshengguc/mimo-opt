@@ -5,11 +5,36 @@
 
 ---
 
-## 已完成（Phase 2 缓存 + Phase 3 技能 + Phase 4 P0 + Phase 5 P1 核心体验 + P1-3 文件操作 + P1-4 确认机制 + P1-6 Content enum + P2-7 多会话 + P3-9 代码复制 + P3-10 技能管理 + Phase 11 去重 + API 多格式架构预留）
+## 已完成（Phase 2-11 + v0.3.0 Provider 系统 + v0.3.1 实测修复 + v0.3.2 P0/P1 收官）
 
-以下优化已全部实现，代码编译通过且 0 warnings，不要再重复做。
+以下优化已全部实现，代码编译通过且 0 errors，不要再重复做。
 
-### 缓存核心三件套
+### v0.3.x：Provider 预设 + DeepSeek 集成 + 实测修复
+
+| # | 优化 | 文件 | 说明 |
+|---|------|------|------|
+| D1 | Provider 预设系统 | [config.rs](src/config.rs) | `provider` 字段 + `ProviderPreset` 结构 + `PROVIDERS` 常量表（mimo/deepseek/openai），含各平台费率 |
+| D2 | OpenAI stream_options | [api/types.rs](src/api/types.rs) | `OpenAIRequest` 新增 `stream_options.include_usage`，DeepSeek 流式返回真实 token 用量 |
+| D3 | Usage serde alias | [api/types.rs](src/api/types.rs) | `Usage` 字段加 `#[serde(alias)]`：同时兼容 Anthropic 的 `input_tokens`/`output_tokens` 和 OpenAI 的 `prompt_tokens`/`completion_tokens` |
+| D4 | OpenAI SSE 用法捕获 | [api/mod.rs](src/api/mod.rs) | `stream_openai()` 从 SSE 事件中捕获 `usage` 字段 |
+| D5 | System prompt 传 OpenAI | [api/mod.rs](src/api/mod.rs) | `build_openai_request` 接收 system 参数，OpenAI 格式不再丢弃系统提示词 |
+| D6 | SSE partial 缓冲 | [api/mod.rs](src/api/mod.rs) | 两套 SSE 解析器均新增 `partial` 缓冲区，跨 chunk 分割事件不再丢失 |
+| D7 | Provider 感知 UI | [ui/draw.rs](src/ui/draw.rs) [app.rs](src/app.rs) | 标题栏动态显示 `{Provider}-OPT`；系统提示词按 provider 输出不同 AI 身份 |
+| D8 | Provider 感知计费 | [app.rs](src/app.rs) [config.rs](src/config.rs) | `calculate_cost` 改为调用 `config.input_price()` / `config.output_price()` |
+| D9 | 启动引导 5 方案 | [main.rs](src/main.rs) | 首次运行提示含 MiMo/DeepSeek/OpenAI/MiMo API/自定义，各方案含完整 JSON 示例 |
+
+### v0.3.2：P0/P1 安全与体验收官
+
+| # | 优化 | 文件 | 说明 |
+|---|------|------|------|
+| S3 | 技能命令注入防护 | [app.rs](src/app.rs) | `shell_escape()` 函数：Unix 单引号包裹转义，Windows `^` 转义 `%^&<>|"()!` |
+| M1 | `/model` 命令 | [app.rs](src/app.rs) [api/mod.rs](src/api/mod.rs) | 运行时切换模型不中断会话，自动保存配置 |
+| M2 | `/provider` 命令 | [app.rs](src/app.rs) [api/mod.rs](src/api/mod.rs) | 运行时切换 provider 预设，自动更新 endpoint/auth/费率，重建 system prompt |
+| M3 | 长对话自动管理 | [app.rs](src/app.rs) [ui/draw.rs](src/ui/draw.rs) | `MAX_MESSAGES=200` 超限截断保留 150，160 条警告，状态栏 `✉ N` 计数 |
+| M4 | spawn 取消机制 | [app.rs](src/app.rs) | `tokio::select!` + `oneshot` channel，3 个 spawn 点全接入，Ctrl+C/Esc 真正中止 HTTP 请求 |
+| — | ClientSettings RwLock | [api/mod.rs](src/api/mod.rs) | 可变字段收敛到 `RwLock<ClientSettings>`，block scope 确保 guard 在 `.await` 前释放 |
+
+### 已支持的 API
 
 | # | 优化 | 文件 | 说明 |
 |---|------|------|------|
@@ -59,9 +84,55 @@
 
 ---
 
-## 待完成优化
+## 待完成优化（v0.3.2 状态）
 
-> 优先级定义：**P0**=体验质变/成本质变，立刻做 | **P1**=核心能力，本迭代做 | **P2**=重要但不急 | **P3**=锦上添花
+> 优先级定义：**P0**=安全/稳定 | **P1**=核心体验 | **P2**=重要但不急 | **P3**=锦上添花
+> **P0 已全部修复（4/4 ✅），P1 已全部实现（4/4 ✅）。以下 P2/P3 为剩余工作。**
+
+### P0：安全修复 ✅ 全部完成
+
+| # | 条目 | 文件 | 状态 |
+|---|------|------|------|
+| S1 | API Key 错误消息泄漏 | [api/mod.rs](src/api/mod.rs) | ✅ v0.3.1 |
+| S2 | 配置文件权限未加固 | [config.rs](src/config.rs) [session.rs](src/session.rs) | ✅ v0.3.1 |
+| S3 | 技能系统命令注入 | [app.rs](src/app.rs) | ✅ v0.3.2 |
+| S4 | Config Debug 暴露密钥 | [config.rs](src/config.rs) | ✅ v0.3.1 |
+
+### P1：核心体验 ✅ 全部完成
+
+| # | 条目 | 文件 | 说明 |
+|---|------|------|------|
+| M1 | `/model` 命令 | [app.rs](src/app.rs) [api/mod.rs](src/api/mod.rs) | ✅ v0.3.2 |
+| M2 | `/provider` 命令 | [app.rs](src/app.rs) [api/mod.rs](src/api/mod.rs) | ✅ v0.3.2 |
+| M3 | 长对话自动管理 | [app.rs](src/app.rs) [ui/draw.rs](src/ui/draw.rs) | ✅ v0.3.2 |
+| M4 | spawn 任务取消机制 | [app.rs](src/app.rs) | ✅ v0.3.2 |
+
+### P2：工程化
+
+| # | 条目 | 文件 | 说明 |
+|---|------|------|------|
+| E1 | API 自动重试 | [api/mod.rs](src/api/mod.rs) | 5xx/timeout/reset 最多 3 次指数退避重试 |
+| E2 | 单元测试 | new `tests/` | file_ops / config / prompt / cost / session 优先 |
+| E3 | SSE channel 有界化 | [app.rs](src/app.rs) [api/mod.rs](src/api/mod.rs) | ✅ 已修复 v0.3.1：`unbounded_channel` → `channel(256)` |
+| E4 | DeepSeek 余额查询 | [main.rs](src/main.rs) | 启动时 `GET /user/balance` 显示余额，标题栏展示 |
+| E5 | 结构化日志 | new dep `log`+`env_logger` | 关键路径加 info/debug/warn 日志 |
+| E6 | app.rs 模块拆分 | [app.rs](src/app.rs) | ~1500 行拆为 app/prompt/scanner/cost/commands 多文件 |
+
+### P3：锦上添花
+
+| # | 条目 | 说明 |
+|---|------|------|
+| U1 | 会话侧边栏 (Ctrl+B) | UI_DESIGN 已规划，显示会话列表 |
+| U2 | 代码块深色背景 | 当前只有竖线边框，无背景色 |
+| U3 | Markdown 渲染增强 | 粗体/斜体/列表/引用/链接/分隔线 |
+| U4 | 主题热切换 | 内置 Tokyo Night/Nord/Catppuccin，`/theme` 切换 |
+| U5 | 终端最小尺寸警告 | 窗口 < 60×20 时显示警告 |
+| U6 | 会话导出 Markdown | `/export [path]` 命令 |
+| U7 | 对话轮次分隔线 | 虚线分隔不同轮次 |
+| U8 | 引用块视觉支持 | `>` 引用用竖线+缩进渲染 |
+| U9 | Shell 管道集成 | `echo "..." | mimo-opt --prompt` |
+| U10 | check_api 省配额 | 跳过启动探测，首条消息自然检测 |
+| D1 | 桌面端 Tauri 迁移 | core/gui 分层，feature flag 可选编译，一套代码双模式 |
 
 ---
 
@@ -95,24 +166,21 @@ fn apply_cache_breakpoints(messages: &mut [ChatMessage]) {
 }
 ```
 
-**改为**：
+**改为**（v0.3.1 优化版：step_by(5) + 4 标记上限）：
 ```rust
 fn apply_cache_breakpoints(messages: &mut [ChatMessage]) {
     let n = messages.len();
-    if n == 0 {
-        return;
-    }
-    // 断点 1：第一条 user message，让 system prompt + 首条消息形成缓存前缀
-    // 后续轮次中 messages[0] 不变，该断点始终命中
+    if n == 0 { return; }
     messages[0].cache_control = Some(CacheControl {
         cache_type: "ephemeral".to_string(),
     });
-    // 断点 2+：每 6 条消息追加一个断点，API 自动匹配最长有效前缀
-    // 6 条 = 3 轮对话，粒度足够细且不会产生过多断点开销
-    for i in (3..n).step_by(6) {
+    let mut placed = 1;
+    for i in (3..n).step_by(5) {
+        if placed >= 4 { break; }  // Anthropic 最多 4 个标记
         messages[i].cache_control = Some(CacheControl {
             cache_type: "ephemeral".to_string(),
         });
+        placed += 1;
     }
 }
 ```
@@ -121,13 +189,16 @@ fn apply_cache_breakpoints(messages: &mut [ChatMessage]) {
 
 **调用位置说明**：`apply_cache_breakpoints` 在两处被调用——普通消息发送路径（约行 344）和技能执行路径（约行 291）。两处都是 `state.messages.clone()` 之后、`send_message_stream()` 之前调用。新实现的函数签名不变，调用方无需修改。
 
-**预期效果**（20 条消息 / 10 轮对话场景）：
+**预期效果**（step_by(5) + 4 标记上限，20 条消息 / 10 轮对话场景）：
 
-| 指标 | 改前 | 改后 |
-|------|------|------|
-| 缓存覆盖的消息数 | 3 条 | 18 条（最后 2 条除外） |
-| 稳定后命中率 | ~15% | ~82% |
-| 每轮节省 input tokens | ~500 | ~2700 |
+| 指标 | 改前 (step_by(6)) | 改后 (step_by(5)) |
+|------|------------------|-------------------|
+| 缓存覆盖的消息数 | 18 条 | 18 条 |
+| 稳定后命中率 | ~75% | ~90% |
+| 每轮节省 input tokens | ~2700 | ~3200 |
+| 断点标记数（25条时） | 5 ⚠️ 超限 | 4 ✅ 合规 |
+
+> 主要收益：间隔从 6 缩到 5 消除锯齿波动，4 标记上限防止超过 Anthropic API 限制
 
 #### 子任务 2：System prompt 去日期化
 
@@ -606,9 +677,13 @@ std::fs::write(&path, content)?;
 
 ---
 
-### 🔴 P0-3：技能系统存在命令注入风险
+### 🔴 P0-3：技能系统存在命令注入风险 ✅ 已修复 v0.3.2
 
 **文件**：[app.rs](src/app.rs):542-547
+
+**修复**：添加 `shell_escape()` 函数，对 `{args}` 替换做平台适配的 shell 转义：
+- Unix/sh：单引号包裹 + 内部单引号转义
+- Windows/cmd：`^` 转义特殊字符（`%^&<>|"()!`）
 
 **问题**：`{args}` 占位符替换是裸字符串替换，无任何转义或校验：
 ```rust
@@ -637,11 +712,13 @@ for arg in &resolved[1..] {
 
 ---
 
-### 🟡 P1-4：Config Debug 实现暴露 API Key
+### 🟡 P1-4：Config Debug 实现暴露 API Key ✅ 已修复 v0.3.1
 
 **文件**：[config.rs](src/config.rs):4
 
-**问题**：`Config` 派生了 `Debug`：
+**修复**：手动实现 `Debug` + `mask_key()` 脱敏函数，`{:?}` 输出 `tp-1...cdef` 格式。
+
+**问题**：`Config` 原本派生了 `Debug`：
 ```rust
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -672,64 +749,37 @@ fn mask_key(key: &str) -> String {
 
 ---
 
-### 🟡 P1-5：会话文件明文存储完整对话历史
+### 🟡 P1-5：会话文件明文存储完整对话历史 ✅ 已修复 v0.3.1
 
 **文件**：[session.rs](src/session.rs):53-59
 
-**问题**：会话 JSON 包含完整对话历史，存储在 `~/.config/mimo-opt/sessions/`。若对话涉及密码、Token、内部代码等敏感信息，文件泄漏后果严重。
+**修复**：`save()` 已对 Unix 平台设置 0600 权限（同 config 加固方案）。
 
-**修复方案**（可选，取决于目标用户的安全需求）：
-1. 至少对 session 文件也设置 0600 权限（同 P0-2）
-2. 提供删除会话的命令（如 `/rmsession <id>`），目前只有清空对话的 `/clear`
-3. 远期可考虑 AES-256-GCM 会话加密（密钥从 OS keychain 读取）
+**远期可考虑**：AES-256-GCM 会话加密（密钥从 OS keychain 读取）
 
 ---
 
-### 🟡 P1-6：tokio::spawn 任务无取消机制，资源泄漏
+### 🟡 P1-6：tokio::spawn 任务无取消机制，资源泄漏 ✅ 已修复 v0.3.2
 
-**文件**：[app.rs](src/app.rs):560-648, 686-693
+**文件**：[app.rs](src/app.rs)
 
-**问题**：每次发送消息都 `tokio::spawn` 一个异步任务执行 HTTP 流式请求。用户按 Ctrl+C 或 Esc 中断生成时，只停止读取 channel 并设置 `generating = false`，但 spawn 的 task **仍在后台运行**，HTTP 连接未关闭，持续消耗带宽和 API 配额。
-
-**修复方案**：使用 `tokio::sync::oneshot` 通知任务取消：
-```rust
-let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
-// 将 cancel_tx 存入 AppState 或局部变量
-tokio::spawn(async move {
-    tokio::select! {
-        result = client.send_message_stream(...) => { /* 正常完成 */ }
-        _ = cancel_rx => { /* 中止，drop HTTP future */ }
-    }
-});
-// Ctrl+C 时
-let _ = cancel_tx.send(());
-```
+**修复**：3 个 spawn 点全接入 `tokio::select!` + `oneshot` channel，Ctrl+C / Esc 发送取消信号真正中止 HTTP 请求。
 
 ---
 
-### 🟡 P1-7：SSE 流式通道无背压，潜在内存膨胀
+### 🟡 P1-7：SSE 流式通道无背压，潜在内存膨胀 ✅ 已修复 v0.3.1
 
 **文件**：[app.rs](src/app.rs):153
 
-**问题**：使用 `mpsc::unbounded_channel()` 传递流式 token。如果 UI 渲染循环因 syntect 语法高亮卡顿，channel 可无限堆积消息，导致内存增长。
-
-**修复方案**：改为有界 channel，如 `mpsc::channel(256)`：
-```rust
-let (token_tx, mut token_rx) = mpsc::channel::<StreamResult>(256);
-```
+**修复**：`unbounded_channel()` → `channel(256)`，有界通道防止无限堆积。
 
 ---
 
-### 🟡 P1-8：消息历史无上限，长对话 OOM + 超上下文窗口
+### 🟡 P1-8：消息历史无上限，长对话 OOM + 超上下文窗口 ✅ 已修复 v0.3.2
 
-**文件**：[app.rs](src/app.rs):34
+**文件**：[app.rs](src/app.rs)
 
-**问题**：`state.messages` 无限累加，没有截断策略。每轮对话都发送完整 messages 数组给 API。后果：内存持续增长；超出模型上下文窗口后 API 报错或静默丢弃前缀内容。
-
-**修复方案**：
-1. 设置最大消息数（如 200 条），超过时弹出警告或自动修剪
-2. 实现上下文窗口感知：累计 token 接近模型限制时，自动修剪最早的非系统消息
-3. 在状态栏显示当前消息数 / 估算 token 占比
+**修复**：`maybe_truncate_messages()` — 超 200 条自动截断保留最近 150 条，160 条时状态栏警告，状态栏显示 `✉ N` 计数。
 
 ---
 
@@ -917,7 +967,7 @@ src/
 
 ---
 
-### 🟢 P3-16：终端最小尺寸警告（UI_DESIGN 已规划未实现）
+### 🟢 P3-16：终端最小尺寸警告 ✅ 已完成 v0.3.5
 
 **文件**：[app.rs](src/app.rs):166-173
 
@@ -981,13 +1031,13 @@ src/
 | API | auth_type | api_format | base_url | 状态 |
 |-----|-----------|------------|----------|------|
 | MiMo Token Plan | anthropic | anthropic | token-plan-sgp.xiaomimimo.com/anthropic | ✅ 默认 |
-| MiMo API | bearer | openai | api.xiaomimimo.com/v1 | ✅ 可用（未实测） |
-| DeepSeek | bearer | openai | api.deepseek.com | ⏳ 架构就绪，未实测 |
-| GLM (智谱) | bearer | openai | open.bigmodel.cn/api/paas/v4 | ⏳ 架构就绪，未实测 |
-| 通义千问 | bearer | openai | dashscope.aliyuncs.com/compatible-mode/v1 | ⏳ 架构就绪，未实测 |
+| DeepSeek | bearer | openai | api.deepseek.com | ✅ 已实测通过 |
+| OpenAI | bearer | openai | api.openai.com | ✅ 已集成 |
+| MiMo API | bearer | openai | api.xiaomimimo.com/v1 | ✅ 可用 |
+| GLM (智谱) | bearer | openai | open.bigmodel.cn/api/paas/v4 | ⏳ provider: "custom" |
+| 通义千问 | bearer | openai | dashscope.aliyuncs.com/compatible-mode/v1 | ⏳ provider: "custom" |
 
 **待做（每个 API 单独验证后再标记可用）**：
-- [ ] DeepSeek 流式解析实测 + token 统计准确性
 - [ ] GLM 流式解析实测（注意其 SSE 格式可能有细微差异）
 - [ ] 通义千问实测
 - [ ] 各 API 的错误响应格式适配（不同厂商的 error body 结构不同）
@@ -1602,14 +1652,13 @@ use tokio::net::TcpListener;
 
 ---
 
-#### 🎯 T-11：/model 模型热切换（功能完整度 +0.03）
+#### 🎯 T-11：/model 模型热切换（功能完整度 +0.03）✅ 已实现 v0.3.2
 
-**改动**：`app.rs` 新增 `/model <name>` 命令
+**改动**：[app.rs](src/app.rs) + [api/mod.rs](src/api/mod.rs)
 
-- 运行时切换模型（如从 `mimo-v2-flash` 切到 `mimo-v2-pro`）
-- 不中断当前会话
+- `/model <name>` 命令：运行时切换模型，不中断会话
 - 标题栏模型名即时更新
-- 可选：记住每个模型的独立费用计数
+- 配置自动保存
 
 ---
 
@@ -1671,57 +1720,327 @@ ENTRYPOINT ["mimo-opt"]
 | 阶段 | 完成项 | 累计分 | 说明 |
 |------|--------|--------|------|
 | **起点** | — | **6.2** | 当前状态 |
-| 安全基线 | P0-1/2/3（审计安全修复） | 6.6 | P0 修复是最低门槛 |
+| 安全基线 | P0-1/2/3（审计安全修复）✅ 全部完成 | 6.6 | P0 修复是最低门槛 |
 | **第一梯队** | T-1 测试 + T-2 安全 + T-3 unwrap | **7.5** | 基础补课完成 |
-| 稳定基线 | P1-4/5/6/7/8（审计 P1 修复） | 7.7 | 稳定性和安全补全 |
+| 稳定基线 | P1-4/5/6/7/8 + M1/M2/M3/M4 ✅ 全部完成 | **7.7** | 安全+体验全部到位 |
 | **第二梯队** | T-4 拆分 + T-5 CI + T-6 日志 + T-7 重试 | **8.3** | 工程化成熟 |
 | 质量基线 | P2-9~16（审计 P2 修复） | 8.4 | 代码质量和兼容性 |
 | **第三梯队** | T-8 MCP + T-9 导出 + T-10 主题 + T-11 热切换 + T-12 Markdown | **8.7** | 差异化 + 体验 |
 | **第四梯队** | T-13~T-15 | **8.8** | 锦上添花 |
 
-> **结论**：当前 6.2 → 第一梯队后 7.5 → 第二梯队后 8.3 → 第三梯队后 8.7。三梯队全做完即可进入"优秀"区间。
+> **2026-05-19 状态**：P0 4/4 ✅ + P1 4/4 ✅ = 安全基线+稳定基线全部到位，当前评分 ~7.7。
 
 ---
 
-## 汇总：本次审计新发现待修复项
+## 汇总：审计发现 + 修复状态
 
-| # | 优先级 | 类型 | 条目 |
-|---|--------|------|------|
-| 1 | 🔴 P0 | 安全 | API Key 错误消息泄漏 |
-| 2 | 🔴 P0 | 安全 | 配置文件权限未加固 |
-| 3 | 🔴 P0 | 安全 | 技能系统命令注入风险 |
-| 4 | 🟡 P1 | 安全 | Config Debug 暴露密钥 |
-| 5 | 🟡 P1 | 安全 | 会话文件明文存储 |
-| 6 | 🟡 P1 | 稳定性 | spawn 任务无取消机制 |
-| 7 | 🟡 P1 | 稳定性 | SSE channel 无背压 |
-| 8 | 🟡 P1 | 稳定性 | 消息历史无上限 |
-| 9 | 🔵 P2 | 可靠性 | 无请求重试 |
-| 10 | 🔵 P2 | 架构 | unwrap_or_default 静默吞错 |
-| 11 | 🔵 P2 | 架构 | app.rs 超 1500 行需拆分 |
-| 12 | 🔵 P2 | 运维 | 缺少结构化日志 |
-| 13 | 🔵 P2 | 质量 | 零测试覆盖 |
-| 14 | 🔵 P2 | 代码质量 | scan_project_tree 死参数 |
-| 15 | 🔵 P2 | 性能 | 每次发送 clone 整个消息列表 |
-| 16 | 🔵 P2 | 兼容性 | cli-clipboard Wayland 不兼容 |
-| 17 | 🟢 P3 | 优化 | check_api 浪费配额 |
-| 18 | 🟢 P3 | 精度 | output_tokens 流式计数不准 |
-| 19 | 🟢 P3 | UI | 对话轮次分隔线 |
-| 20 | 🟢 P3 | UI | 会话侧边栏（Ctrl+B） |
-| 21 | 🟢 P3 | UI | 代码块深色背景 |
-| 22 | 🟢 P3 | UI | 终端最小尺寸警告 |
-| 23 | 🟢 P3 | UI | 引用块（blockquote）视觉支持 |
+| # | 优先级 | 类型 | 条目 | 状态 |
+|---|--------|------|------|------|
+| 1 | 🔴 P0 | 安全 | API Key 错误消息泄漏 | ✅ v0.3.1 |
+| 2 | 🔴 P0 | 安全 | 配置文件权限未加固 | ✅ v0.3.1 |
+| 3 | 🔴 P0 | 安全 | 技能系统命令注入风险 | ✅ v0.3.2 |
+| 4 | 🟡 P1 | 安全 | Config Debug 暴露密钥 | ✅ v0.3.1 |
+| 5 | 🟡 P1 | 安全 | 会话文件明文存储 | ✅ v0.3.1 |
+| 6 | 🟡 P1 | 稳定性 | spawn 任务无取消机制 | ✅ v0.3.2 |
+| 7 | 🟡 P1 | 稳定性 | SSE channel 无背压 | ✅ v0.3.1 |
+| 8 | 🟡 P1 | 稳定性 | 消息历史无上限 | ✅ v0.3.2 |
+| 9 | 🔵 P2 | 可靠性 | 无请求重试 | ⏳ |
+| 10 | 🔵 P2 | 架构 | unwrap_or_default 静默吞错 | ⏳ |
+| 11 | 🔵 P2 | 架构 | app.rs 超 1500 行需拆分 | ⏳ |
+| 12 | 🔵 P2 | 运维 | 缺少结构化日志 | ⏳ |
+| 13 | 🔵 P2 | 质量 | 零测试覆盖 | ⏳ |
+| 14 | 🔵 P2 | 代码质量 | scan_project_tree 死参数 | ✅ v0.3.3 前已修复 |
+| 15 | 🔵 P2 | 性能 | 每次发送 clone 整个消息列表 | ⏳ |
+| 16 | 🔵 P2 | 兼容性 | cli-clipboard Wayland 不兼容 | ⏳ |
+| 17 | 🟢 P3 | 优化 | check_api 浪费配额 | ✅ v0.3.5 |
+| 18 | 🟢 P3 | 精度 | output_tokens 流式计数不准 | ⏳ |
+| 19 | 🟢 P3 | UI | 对话轮次分隔线 | ✅ v0.3.5 |
+| 20 | 🟢 P3 | UI | 会话侧边栏（Ctrl+B） | ⏳ |
+| 21 | 🟢 P3 | UI | 代码块深色背景 | ✅ v0.3.4 |
+| 22 | 🟢 P3 | UI | 终端最小尺寸警告 | ✅ v0.3.5 |
+| 23 | 🟢 P3 | UI | 引用块（blockquote）视觉支持 | ⏳ |
 
-> **建议发布节奏**：P0 全部修完 → 内测；P1 修完 → 公测；P2 在 v1.0 前完成；P3 按需做。
+### v0.3.3 Bug 修复状态
+
+| Bug | 优先级 | 状态 | 说明 |
+|-----|--------|------|------|
+| B1 SSE 分隔符 | P1 | ✅ v0.3.3 前已修复 | `find_sse_separator()` 已处理 `\r\n\r\n` |
+| B2 stream_buffer 扫描 | P2 | ✅ v0.3.3 前已修复 | `collect_code_blocks()` 已扫描 stream_buffer |
+| B3 `/read` 行号解析 | P2 | ✅ v0.3.4 | 错误提示改善 |
+| B4 send_to_mimo 消息数 | P2 | ✅ v0.3.3 前已修复 | 已有 `MAX_MESSAGES` 检查 |
+| B5 is_git_repo 死参数 | P2 | ✅ v0.3.3 前已修复 | 参数已移除 |
+| B6 会话 token 持久化 | P3 | ✅ v0.3.4 | Session 新增 5 个 token 字段 |
+| B7 搜索高亮对比度 | P3 | ✅ v0.3.4 | 背景色 `#3b4261` → `#565f89` |
+| B8 日期注入角色错误 | P3 | ✅ v0.3.4 | 改为检查 role=="user" + 不重复注入 |
+| B9 27 个 clippy 警告 | P3 | ✅ v0.3.4 | 27 → 0 |
+
+### v0.3.4 UX 优化状态
+
+| 优化 | 优先级 | 状态 | 说明 |
+|------|--------|------|------|
+| U1 Ctrl+V 粘贴 | ★★★★★ | ✅ v0.3.4 | cli_clipboard::get_contents() |
+| U2 代码块深色背景 | ★★★★★ | ✅ v0.3.4 | CODE_BG = #1a1b26 |
+| U3 长消息发送确认 | ★★★★ | ✅ v0.3.5 | >5 行弹确认，取消恢复输入 |
+| U4 对话轮次分隔线 | ★★★★ | ✅ v0.3.5 | 虚线分隔不同问答轮次 |
+| U5 API 余额查询 | ★★★★ | ⏳ | — |
+| U6 会话导出 Markdown | ★★★★ | ✅ v0.3.5 | `/export [path]` 导出含元信息的 .md |
+| U7 输入框多行扩展 | ★★★ | ⏳ | — |
+| U8 Markdown 渲染增强 | ★★★ | ⏳ | — |
+| U9 错误信息历史 | ★★★ | ✅ v0.3.5 | API 错误自动记录 20 条 + `/errors` 查看 |
+| U10 终端尺寸检查 | ★★★ | ✅ v0.3.5 | <60×20 居中红色警告 |
+
+> **当前状态**：P0 全部修完 ✅ → P1 全部到位 ✅ → v0.3.3 bug 全部修复 ✅ → clippy 零警告 ✅ → U1/U2 已实现。当前可发布 v0.3.4。
+
+---
+
+## v0.3.3 实机测试：Bug 报告 & 用户优化建议 (2026-05-19)
+
+> 对 v0.3.2 进行实机测试、代码审查和用户体验评估。发现 9 个 bug（含 2 个功能性 bug）+ 26 个 clippy 警告 + 15 条用户优化建议。
+
+---
+
+### Bug 报告
+
+#### B1 (P1): SSE 事件分隔符硬编码 `\n\n`，不兼容 `\r\n\r\n` 服务器
+
+**文件**: [api/mod.rs](src/api/mod.rs):237, [api/mod.rs](src/api/mod.rs):380
+
+**问题**: 两套 SSE 解析器统一使用 `remaining.find("\n\n")` 分割事件。部分 SSE 服务器（包括某些代理和负载均衡器）使用 `\r\n\r\n` 作为事件分隔符。遇到此类服务器时，事件永远无法被分割，所有 token 静默丢失，用户看到 stream_buffer 始终为空。
+
+**修复**: 同时匹配两种分隔符，取最先出现者：
+```rust
+let sep = remaining.find("\n\n")
+    .or_else(|| remaining.find("\r\n\r\n"))
+    .unwrap_or(remaining.len());
+```
+
+#### B2 (P2): `collect_code_blocks` 忽略 stream_buffer，Ctrl+Y 对生成中的代码块无效
+
+**文件**: [app.rs](src/app.rs):1067-1096
+
+**问题**: `extract_last_code_block()` 同时搜索 stream_buffer 和 messages（优先 stream_buffer），但 `collect_code_blocks()` 仅扫描 `state.messages`。用户在流式生成过程中按 Ctrl+Y 时：
+- `/write` 能正确提取代码块（因为走 `extract_last_code_block`）
+- Ctrl+Y 却不能（因为走 `collect_code_blocks`），显示"对话中未找到代码块"
+
+**修复**: `collect_code_blocks()` 应同时扫描 stream_buffer，或复用 `extract_code_from_text()`。
+
+#### B3 (P2): `handle_read_command` 行范围解析中 `unwrap_or(0)` 静默吞错
+
+**文件**: [app.rs](src/app.rs):1127-1128
+
+**问题**: 
+```rust
+let start: usize = after[..dash_idx].parse().unwrap_or(0);
+let end: usize = after[dash_idx + 1..].parse().unwrap_or(0);
+```
+当用户输入 `/read src/main.rs:abc-def` 时静默解析为 start=0, end=0，然后条件 `start > 0 && end >= start` 为 false，路径被当作纯路径（读取整个文件）。用户以为在读指定行，实际读了整个文件。
+
+**修复**: parse 失败时直接设置 `state.error_message` 并 return，而非静默 fallback。
+
+#### B4 (P2): `send_to_mimo` 路径缺少消息数检查和截断
+
+**文件**: [app.rs](src/app.rs):1478-1523
+
+**问题**: 正常发送路径调用 `maybe_truncate_messages(state)` 检查并限制消息数。`send_to_mimo()` 在内部 clone 消息列表并追加一条 user 消息后直接发送，未做上限检查。`/read` 触发 `send_to_mimo()`，连续使用 `/read` 多次后 `msgs` 可能超过 `MAX_MESSAGES`（200），导致：
+1. API 请求过大，响应变慢或直接被拒
+2. 与主路径行为不一致
+
+**修复**: 在 `send_to_mimo` 的 `msgs` 构建后添加截断逻辑。
+
+#### B5 (P2): `is_git_repo` 死参数在全递归链路中传递但从未使用
+
+**文件**: [app.rs](src/app.rs):1554, [app.rs](src/app.rs):1579, [app.rs](src/app.rs):1629
+
+**问题**: `scan_dir_recursive()` 接受 `is_git_repo: bool` 参数，在整个递归中传递，但代码中无任何逻辑引用该值（clippy 已报告 `only_used_in_recursion`）。疑似为 `.gitignore` 解析预留但从未实现，造成代码噪音。
+
+**修复**: 移除该参数，或在后续版本中实现 `.gitignore` 解析功能。
+
+#### B6 (P3): 会话 token 计数/费用在重启后丢失
+
+**文件**: [app.rs](src/app.rs):281-290, [session.rs](src/session.rs):8-15
+
+**问题**: 切换会话时，代码将 `total_input_tokens` 等悉数归零（行 285-289），而非从 Session 数据中恢复。`Session` 结构体也不包含 token 累计字段。用户工作一段时间后重启或切换会话回来，状态栏 token 数和费用全部归零，看不到真实累计用量。
+
+**修复方案**:
+1. `Session` 结构体新增 `total_input_tokens` / `total_output_tokens` / `total_cache_read_tokens` / `total_cost` 字段
+2. `save_session()` 同步写入这些字段
+3. Ctrl+N / F2 切换时从 Session 恢复而非归零
+
+#### B7 (P3): 搜索高亮对比度极低，几乎不可见
+
+**文件**: [ui/draw.rs](src/ui/draw.rs):287
+
+**问题**: 搜索匹配消息的高亮背景色为 `Color::Rgb(59, 66, 97)`（#3b4261），与终端默认深色背景（#1a1b26）仅有微弱差异。实际使用时难以辨识哪条消息被匹配到，搜索功能形同虚设。
+
+**修复**: 改为更亮的颜色，如 `Color::Rgb(86, 95, 137)` 或金黄色 `Color::Rgb(255, 200, 50)`。
+
+#### B8 (P3): `send_to_mimo` 在仅有一条消息时可能重复注入日期
+
+**文件**: [app.rs](src/app.rs):1488-1495
+
+**问题**: `send_to_mifo` 内部检查 `state.messages.len() == 1` 时注入日期。正常流程中日期已在首次普通消息发送时注入。但如果用户在全新会话中先使用 `/read`（此时 state.messages 仅包含 /read 的 assistant 结果，共 1 条），`send_to_mimo` 会在第一条消息的 content 末尾追加日期——但这条消息是 assistant 消息而非 user 消息。日期注入到了错误的消息角色中。
+
+**修复**: 将 `len() == 1` 改为检查 messages[0].role == "user" 且 content 不含 `[Current date:]`。
+
+#### B9 (P3): 26 个 clippy 警告积压
+
+**文件**: 主要在 [app.rs](src/app.rs)，少量 [file_ops.rs](src/file_ops.rs), [session.rs](src/session.rs)
+
+**分布**:
+- `collapsible_match` × 9 — 内层 if 可合并到 match arm guard
+- `needless_borrow` × 6 — `&client` / `&token_tx` 多余引用
+- `manual_strip` × 4 — 手动切片可改用 `strip_prefix()`
+- `manual_is_multiple_of` × 3 — `year % 4 == 0` → `year.is_multiple_of(4)`
+- `explicit_counter_loop` × 1 — `placed` 变量可用 `.enumerate()` 替代
+- `let_underscore_future` × 1 — `let _ = tx.send(...)` 未 await
+- `unnecessary_sort_by` × 1 — `sort_by` → `sort_by_key`
+- `only_used_in_recursion` × 1 — `is_git_repo` 死参数
+
+---
+
+### 用户视角优化建议
+
+> 按体验影响和实现成本排序，`★` 越多优先级越高。
+
+#### U1 ★★★★★ Ctrl+V 粘贴支持
+
+**现状**: 输入框仅支持键盘逐字输入，无法粘贴剪贴板内容。用户想发送一段代码或 URL 时必须手动敲入，体验极差。现代终端工具中粘贴是基本功能。
+
+**方案**: crossterm 支持 `KeyCode::Char('v')` + `KeyModifiers::CONTROL` 时读取剪贴板（`cli-clipboard::get_contents()`）插入到光标位置。已在依赖列表中，实现成本极低（~15 行）。
+
+#### U2 ★★★★★ 代码块深色背景
+
+**现状**: 代码块只有左侧竖线边框，无背景色区分。代码和对话文字视觉上非常接近，长代码段难以辨识边界。
+
+**方案**: 代码块行用 `Span::styled` 设置 `bg = Color::Rgb(0x1a, 0x1b, 0x26)`（UI_DESIGN 已规划，仅需改 `draw_chat_area()` 中代码块渲染部分，~5 行）。对比度提升效果显著。
+
+#### U3 ★★★★ 发送前确认（长消息场景）
+
+**现状**: Ctrl+Enter 立即发送，无法撤销。误触时浪费 API 配额。对于代码审查场景（消息长达数百行），错误发送的损失更大。
+
+**方案**: 增加一个可配置的"发送确认"开关（默认关闭）。开启后，输入超过 N 行的消息时，首次 Ctrl+Enter 弹出确认提示，再次 Ctrl+Enter 确认发送。
+
+#### U4 ★★★★ 对话轮次分隔线
+
+**现状**: 不同轮次的对话之间无视觉分隔，长对话中难以快速区分问答边界（UI_DESIGN 已规划未实现）。
+
+**方案**: 每条消息前插入虚线分隔 `─ ─ ─ ─ ─ ─ ─ ─ ─`（颜色 `#3b4261`），在 `draw_chat_area()` 中非首条消息时追加。
+
+#### U5 ★★★★ API 余额查询
+
+**现状**: 用户无法从应用内获知 API 配额余额。对于按量付费场景，需要额外打开浏览器查看。
+
+**方案**: 启动时对已知 provider 调用余额接口（DeepSeek `GET /user/balance`，MiMo 对应接口），标题栏 API 状态旁显示 `¥12.34` 余额。对不支持的 provider 则跳过。
+
+#### U6 ★★★★ 会话导出 Markdown
+
+**现状**: 有价值的对话无法导出分享。用户只能手动截图或复制粘贴（丢失语法高亮和格式）。
+
+**方案**: 新增 `/export [path]` 命令，将会话输出为 `.md` 文件：
+- YAML frontmatter 元信息（日期/模型/token/费用）
+- 用户消息 `## User` + MiMo 回复 `## MiMo`
+- 代码块保留语法高亮（嵌入 markdown 就是 ` ``` ` 围栏）
+
+#### U7 ★★★ 输入框多行自动扩展
+
+**现状**: 输入框固定 3 行。粘贴长代码段时需要外部编辑器写好再粘贴（还不能粘贴）。对于需要提供大段上下文的场景（'帮我重构这段代码'），输入体验极差。
+
+**方案**: 输入内容超过当前可见区域时自动扩展输入框高度（最多到半屏），动态调整布局约束。
+
+#### U8 ★★★ Markdown 粗体/斜体/列表渲染
+
+**现状**: MiMo 回复中的 `**粗体**` / `*斜体*` / `- 列表项` 显示为纯文本，没有任何特殊渲染。对比 ChatGPT 终端的渲染效果，阅读体验差距明显。
+
+**方案**: 在 `draw_chat_area()` 的消息渲染循环中，逐行检测行首模式并叠加 ratatui Style：
+- `**text**` → `Modifier::BOLD`
+- `*text*` → `Modifier::ITALIC`（终端支持时）
+- `` `code` `` → 反色背景高亮
+- `- ` / `* ` 开头 → `  • ` 前缀 + 缩进
+- `1. ` 开头 → `  1. ` 前缀
+
+#### U9 ★★★ 错误信息历史
+
+**现状**: 错误信息仅在状态栏显示一次（下次按键即被替换为 copy_status）。用户想仔细阅读错误详情时已经消失了。
+
+**方案**: `AppState` 新增 `error_history: Vec<String>`（最多 20 条），状态栏错误持续显示直到下一条新错误，同时提供 `/errors` 命令查看历史。
+
+#### U10 ★★★ 终端窗口尺寸检查
+
+**现状**: 窗口 < 60×20 时布局崩坏（标题栏文字重叠、状态栏截断、输入框变形），但无任何提示。UI_DESIGN 已规划未实现。
+
+**方案**: 每次 draw 前检查 `f.area()` 尺寸，太小则绘制居中警告 `"窗口过小，请调整到 60×20 以上"`（~20 行）。
+
+#### U11 ★★ 会话侧边栏
+
+**现状**: F2 盲切会话，无法一览当前有哪些会话以及各自的消息数。UI_DESIGN 已设计完整方案。
+
+**方案**: Ctrl+B 呼出左侧 24 字符侧边栏，显示会话列表 + 消息数 + 更新时间 + 新建按钮（~80 行）。
+
+#### U12 ★★ 流式 token 计数精度优化
+
+**现状**: Anthropic 流式解析器中 `output_tokens += 1` 假设每个 text_delta 恰好 1 个 token，实际上一个 delta 可能含多个 token。真正的准确值在 message_delta 的 usage 中。
+
+**方案**: 去掉粗略累加（或仅在流式过程中做粗略显示并标注"~"），在 Done 时用 API 返回的精确值覆盖。
+
+#### U13 ★★ 模型参数可配置（temperature / top_p）
+
+**现状**: 配置文件仅支持 model 和 max_tokens，不支持 temperature、top_p 等推理参数。无法调整 MiMo 的输出风格（创造性/确定性）。
+
+**方案**: Config 新增可选的 `temperature` / `top_p` 字段，构建请求时按配置传递（Anthropic 和 OpenAI 格式都支持这些参数）。
+
+#### U14 ★ `check_api` 省配额优化
+
+**现状**: 启动时发送 `"hi"` + `max_tokens=1` 探测 API。虽然 token 量极小，但可以更优雅——skip 启动检测，首条实际消息自然验证 API 可用性。
+
+**方案**: 移除启动时的 `check_api()` 调用，首条消息发送失败时将错误信息展示在状态栏。或仅在启动时做一个无 body 的 HEAD 请求验证连通性。
+
+#### U15 ★ 引用块视觉区分
+
+**现状**: MiMo 回复中的 `> 引用文字` 显示为普通文本，无缩进、无竖线、无颜色区分。UI_DESIGN 配色规划了引用块边框色 `#3d59a1` 但未实现。
+
+**方案**: `draw_chat_area()` 中识别 `>` 开头行，用竖线 + 缩进 + 特定颜色渲染，连续 `>` 行合并为一个引用块（~30 行）。
+
+---
+
+### 综合评分更新
+
+| 维度 | v0.3.2 | v0.3.3 (建议) | 说明 |
+|------|--------|---------------|------|
+| 安全性 | 8.5/10 | 8.5/10 | P0 安全已全部到位，本次无新增安全问题 |
+| 稳定性 | 7.5/10 | 8.0/10 | B1 SSE 兼容性修复可避免一类静默失败 |
+| 代码质量 | 6.5/10 | 7.5/10 | 修复 26 clippy 警告 + B3/B5 代码缺陷 |
+| 测试覆盖 | 0.0/10 | 0.0/10 | 仍为零测试，需尽快补充（见 T-1） |
+| UI/UX | 7.0/10 | 7.5/10 | U1粘贴 + U2代码块背景 + U4分隔线 + U7搜索 |
+| 功能完整度 | 7.5/10 | 7.5/10 | 核心功能完整，U5余额 + U6导出 为增值 |
+| **总评** | **~7.7** | **~8.1** | 修复功能性 bug + 关键 UX 优化后目标 |
+
+---
+
+### 本次审查总结 (v0.3.3)
+
+- **发现 Bug**: 9 个（P1×1, P2×4, P3×4），无 P0 安全漏洞
+- **Clippy 警告**: 26 个，均为风格/最佳实践问题
+- **用户优化建议**: 15 条（其中 U1 粘贴、U2 代码块背景、U4 分隔线性价比最高）
+- **测试状态**: 0 tests（最大风险项）
+
+### v0.3.4 修复总结
+
+- **修复 Bug**: 8/9（B1-B5 已在之前版本修复，B6/B7/B8 本次修复）
+- **新功能**: U1 Ctrl+V 粘贴 + U2 代码块深色背景
+- **Clippy**: 27 → 0 warnings
+- **评分**: 7.7 → 8.1+
 
 ---
 ---
 
 ## 项目快照
 
-- **当前行数**：~3000 行 Rust（11 个源文件，新增 util.rs）
+- **当前版本**：v0.3.5
+- **当前行数**：~3661 行 Rust（11 个源文件）
 - **依赖**：tokio, reqwest, serde, serde_json, ratatui, crossterm, futures-util, dirs, anyhow, scopeguard, unicode-width, syntect, cli-clipboard
-- **编译状态**：通过，0 warnings
-- **API 端点**：`https://token-plan-sgp.xiaomimimo.com/anthropic`（Anthropic Messages 兼容）+ OpenAI 兼容格式架构已就绪
-- **默认模型**：mimo-v2-flash
-- **API 格式支持**：Anthropic（默认）/ OpenAI 兼容（架构就绪，待逐 API 实测）
-- **待完成条目**：1 项（P2-8 桌面端，已决定跳过终端版先交付）
+- **编译状态**：通过，0 errors，0 clippy warnings
+- **测试覆盖**：0 tests
+- **API 端点**：4 provider 预设（MiMo Token Plan / DeepSeek / OpenAI / 自定义 OpenAI 兼容）
+- **默认模型**：deepseek-chat（当前配置）
+- **API 格式支持**：Anthropic（默认）/ OpenAI 兼容（DeepSeek 实测通过）
+- **待完成条目**：0 P0 + 0 P1 + 9 P2 + 7 P3（U1-U4/U6/U9-U10/U14 已完成）

@@ -10,6 +10,7 @@ impl Theme {
     pub const USER_MSG: Color = Color::Rgb(192, 202, 245);      // #c0caf5 亮白
     pub const MIMO_MSG: Color = Color::Rgb(169, 177, 214);      // #a9b1d6 浅灰白
     pub const CODE_BORDER: Color = Color::Rgb(59, 66, 97);      // #3b4261 深灰
+    pub const CODE_BG: Color = Color::Rgb(26, 27, 38);          // #1a1b26 深蓝黑
     pub const STATUS_DATA: Color = Color::Rgb(125, 207, 255);   // #7dcfff 青色
     pub const STATUS_LABEL: Color = Color::Rgb(86, 95, 137);    // #565f89 暗灰
     pub const INPUT_PROMPT: Color = Color::Rgb(187, 154, 247);  // #bb9af7 紫色

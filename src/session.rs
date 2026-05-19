@@ -12,6 +12,16 @@ pub struct Session {
     pub messages: Vec<ChatMessage>,
     pub created_at: u64,
     pub updated_at: u64,
+    #[serde(default)]
+    pub total_input_tokens: u64,
+    #[serde(default)]
+    pub total_output_tokens: u64,
+    #[serde(default)]
+    pub total_cache_creation_tokens: u64,
+    #[serde(default)]
+    pub total_cache_read_tokens: u64,
+    #[serde(default)]
+    pub total_cost: f64,
 }
 
 fn session_dir() -> anyhow::Result<PathBuf> {
@@ -31,6 +41,11 @@ impl Session {
             messages: Vec::new(),
             created_at: ts,
             updated_at: ts,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_creation_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cost: 0.0,
         }
     }
 
@@ -47,9 +62,19 @@ impl Session {
     pub fn save(&self) -> anyhow::Result<()> {
         let dir = session_dir()?;
         std::fs::create_dir_all(&dir)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        }
         let path = dir.join(format!("{}.json", self.id));
         let content = serde_json::to_string_pretty(self)?;
         std::fs::write(&path, content)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
         Ok(())
     }
 
@@ -94,7 +119,7 @@ impl Session {
             }
         }
 
-        list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        list.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
         list
     }
 }

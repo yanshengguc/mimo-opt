@@ -5,8 +5,8 @@ use crate::util::now_secs;
 /// 去除 Windows 的 \\?\ 前缀，避免 canonicalize 后路径比较失败
 fn strip_unc_prefix(path: &Path) -> PathBuf {
     let s = path.to_string_lossy();
-    if s.starts_with("\\\\?\\") {
-        PathBuf::from(&s[4..])
+    if let Some(stripped) = s.strip_prefix("\\\\?\\") {
+        PathBuf::from(stripped)
     } else {
         path.to_path_buf()
     }

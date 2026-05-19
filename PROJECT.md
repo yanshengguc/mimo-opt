@@ -10,11 +10,12 @@
 
 **核心卖点：**
 1. 缓存优化直接省钱（70%+ 命中率）
-2. 代码块语法高亮（syntect）
-3. 文件操作（read/write/edit）
-4. 技能系统（/命令执行 shell）
-5. 多会话持久化
-6. 单二进制零依赖部署
+2. 多 Provider 支持（MiMo / DeepSeek / OpenAI / 自定义）
+3. 代码块语法高亮（syntect）
+4. 文件操作（read/write/edit）
+5. 技能系统（/命令执行 shell）
+6. 多会话持久化
+7. 单二进制零依赖部署
 
 ---
 
@@ -54,6 +55,8 @@
 | **交互** | 输入历史浏览（↑/↓） | ✅ |
 | | 聊天区滚动（PageUp/Down） | ✅ |
 | | 消息搜索（Ctrl+F） | ✅ |
+| | Ctrl+V 粘贴剪贴板 | ✅ |
+| | 代码块深色背景 #1a1b26 | ✅ |
 | **文件操作** | /read 读取文件 | ✅ |
 | | /write 写入文件 | ✅ |
 | | /edit 字符串替换 | ✅ |
@@ -68,6 +71,14 @@
 | | 自动保存（每 5 条 + 退出） | ✅ |
 | **安全** | 破坏性操作确认弹窗 | ✅ |
 | | Content enum 前向兼容 | ✅ |
+| **热切换** | /model 运行时切换模型 | ✅ |
+| | /provider 切换 API 提供商 | ✅ |
+| **会话** | token/费用持久化（重启恢复） | ✅ |
+| **UX** | 长消息发送确认（>5 行） | ✅ |
+| | 对话轮次分隔线 | ✅ |
+| | 终端最小尺寸检查 | ✅ |
+| | 错误历史 + /errors 查看 | ✅ |
+| **导出** | /export 会话导出 Markdown | ✅ |
 
 ### 待完成
 
@@ -75,7 +86,6 @@
 |------|--------|------|
 | 桌面端（Tauri） | P2-8 | 已决定终端版先交付 |
 | 导出会话为 Markdown | P3 | |
-| 模型热切换（/model） | P3 | |
 | MCP 支持 | P3 | |
 | HTTP API 模式 | P3 | |
 
@@ -83,11 +93,12 @@
 
 ## 项目快照
 
-- **当前行数**：~2850 行 Rust（10 个源文件）
+- **当前行数**：~3661 行 Rust（11 个源文件）
 - **依赖**：tokio, reqwest, serde, serde_json, ratatui, crossterm, futures-util, dirs, anyhow, scopeguard, unicode-width, syntect, cli-clipboard
 - **编译状态**：通过，0 warnings
-- **API 端点**：`https://token-plan-sgp.xiaomimimo.com/anthropic`（Anthropic Messages 兼容）
+- **API 端点**：MiMo Token Plan / DeepSeek / OpenAI / 自定义（多 Provider 预设）
 - **默认模型**：mimo-v2-flash
+- **Provider**：`/model` 和 `/provider` 运行时热切换
 
 ---
 

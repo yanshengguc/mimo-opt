@@ -87,16 +87,24 @@ pub struct OpenAIMessage {
 }
 
 #[derive(Debug, Serialize)]
+pub struct OpenAIStreamOptions {
+    pub include_usage: bool,
+}
+
+#[derive(Debug, Serialize)]
 pub struct OpenAIRequest {
     pub model: String,
     pub messages: Vec<OpenAIMessage>,
     pub max_tokens: u32,
     pub stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_options: Option<OpenAIStreamOptions>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct OpenAIStreamEvent {
     pub choices: Option<Vec<OpenAIChoice>>,
+    pub usage: Option<Usage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -113,7 +121,9 @@ pub struct OpenAIDelta {
 
 #[derive(Debug, Deserialize)]
 pub struct Usage {
+    #[serde(alias = "prompt_tokens")]
     pub input_tokens: Option<u64>,
+    #[serde(alias = "completion_tokens")]
     pub output_tokens: Option<u64>,
     pub cache_creation_input_tokens: Option<u64>,
     pub cache_read_input_tokens: Option<u64>,

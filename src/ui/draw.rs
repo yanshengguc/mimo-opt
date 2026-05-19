@@ -110,20 +110,33 @@ fn highlight_line<'a>(
                 let fg = style.foreground;
                 spans.push(Span::styled(
                     text.to_string(),
-                    Style::default().fg(Color::Rgb(fg.r, fg.g, fg.b)),
+                    Style::default().fg(Color::Rgb(fg.r, fg.g, fg.b)).bg(AppTheme::CODE_BG),
                 ));
             }
         }
         Err(_) => {
             spans.push(Span::styled(
                 line.to_string(),
-                Style::default().fg(AppTheme::MIMO_MSG),
+                Style::default().fg(AppTheme::MIMO_MSG).bg(AppTheme::CODE_BG),
             ));
         }
     }
 }
 
 pub fn draw(f: &mut Frame, state: &AppState) {
+    // 终端最小尺寸检查
+    let area = f.area();
+    if area.width < 60 || area.height < 20 {
+        let warning = Line::from(Span::styled(
+            " 窗口过小，请调整到 60×20 以上 ",
+            Style::default().fg(AppTheme::ERROR).add_modifier(Modifier::BOLD),
+        ));
+        let block = Block::default().borders(Borders::ALL)
+            .border_style(Style::default().fg(AppTheme::ERROR));
+        f.render_widget(Paragraph::new(warning).block(block).alignment(ratatui::layout::Alignment::Center), area);
+        return;
+    }
+
     let hint_len = if state.hint_lines.is_empty() { 0u16 } else { 1 };
     let search_len = if state.search_active { 1u16 } else { 0 };
 
@@ -162,7 +175,13 @@ fn draw_title_bar(f: &mut Frame, area: Rect, state: &AppState) {
     } else {
         session_name.clone()
     };
-    let title = format!(" MiMo-OPT [{}] ", short_name);
+    let provider_label = match state.config.provider.as_str() {
+        "deepseek" => "DeepSeek",
+        "openai" => "OpenAI",
+        "mimo" => "MiMo",
+        _ => "Custom",
+    };
+    let title = format!(" {}-OPT [{}] ", provider_label, short_name);
 
     // API 状态显示
     let (api_text, api_color) = match state.api_ok {
@@ -227,7 +246,14 @@ fn draw_chat_area(f: &mut Frame, area: Rect, state: &AppState) {
     for (msg_idx, msg) in state.messages.iter().enumerate() {
         let start_line = lines.len();
 
-        if !lines.is_empty() {
+        if msg.role == "user" && msg_idx > 0 {
+            let sep_width = (area.width as usize).saturating_sub(6);
+            let sep: String = " ─".repeat(sep_width / 2);
+            lines.push(Line::from(Span::styled(
+                format!("   {}", sep),
+                Style::default().fg(AppTheme::CODE_BORDER),
+            )));
+        } else if !lines.is_empty() {
             lines.push(Line::raw(""));
         }
 
@@ -248,18 +274,18 @@ fn draw_chat_area(f: &mut Frame, area: Rect, state: &AppState) {
                     if let Some(ref lang) = code_lang {
                         lines.push(Line::from(Span::styled(
                             format!("   ┌─ {} ──", lang),
-                            Style::default().fg(AppTheme::CODE_BORDER),
+                            Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG),
                         )));
                     } else {
                         lines.push(Line::from(Span::styled(
                             "   ┌──────────",
-                            Style::default().fg(AppTheme::CODE_BORDER),
+                            Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG),
                         )));
                     }
                 } else {
                     lines.push(Line::from(Span::styled(
                         "   └──────────",
-                        Style::default().fg(AppTheme::CODE_BORDER),
+                        Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG),
                     )));
                     in_code_block = false;
                     code_lang = None;
@@ -272,13 +298,13 @@ fn draw_chat_area(f: &mut Frame, area: Rect, state: &AppState) {
                 };
                 let mut h = HighlightLines::new(syntax, syn_theme);
                 let mut code_spans = vec![
-                    Span::styled("  │ ", Style::default().fg(AppTheme::CODE_BORDER)),
+                    Span::styled("  │ ", Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG)),
                 ];
                 highlight_line(&mut h, ps, line, &mut code_spans);
                 lines.push(Line::from(code_spans));
             } else {
                 let style = if is_search_match {
-                    Style::default().fg(default_color).bg(Color::Rgb(59, 66, 97))
+                    Style::default().fg(default_color).bg(Color::Rgb(86, 95, 137))
                 } else {
                     Style::default().fg(default_color)
                 };
@@ -297,7 +323,7 @@ fn draw_chat_area(f: &mut Frame, area: Rect, state: &AppState) {
     if in_code_block {
         lines.push(Line::from(Span::styled(
             "   └──────────",
-            Style::default().fg(AppTheme::CODE_BORDER),
+            Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG),
         )));
     }
 
@@ -321,7 +347,7 @@ fn draw_chat_area(f: &mut Frame, area: Rect, state: &AppState) {
                     if is_code_fence(line).is_some() {
                         lines.push(Line::from(Span::styled(
                             "   └──────────",
-                            Style::default().fg(AppTheme::CODE_BORDER),
+                            Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG),
                         )));
                         stream_code_lang = None;
                         continue;
@@ -333,7 +359,7 @@ fn draw_chat_area(f: &mut Frame, area: Rect, state: &AppState) {
                     };
                     let mut h = HighlightLines::new(syntax, syn_theme);
                     let mut code_spans = vec![
-                        Span::styled("  │ ", Style::default().fg(AppTheme::CODE_BORDER)),
+                        Span::styled("  │ ", Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG)),
                     ];
                     highlight_line(&mut h, ps, line, &mut code_spans);
                     lines.push(Line::from(code_spans));
@@ -342,12 +368,12 @@ fn draw_chat_area(f: &mut Frame, area: Rect, state: &AppState) {
                     if let Some(ref lang) = lang_opt {
                         lines.push(Line::from(Span::styled(
                             format!("   ┌─ {} ──", lang),
-                            Style::default().fg(AppTheme::CODE_BORDER),
+                            Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG),
                         )));
                     } else {
                         lines.push(Line::from(Span::styled(
                             "   ┌──────────",
-                            Style::default().fg(AppTheme::CODE_BORDER),
+                            Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG),
                         )));
                     }
                 } else {
@@ -360,7 +386,7 @@ fn draw_chat_area(f: &mut Frame, area: Rect, state: &AppState) {
             if stream_code_lang.is_some() {
                 lines.push(Line::from(Span::styled(
                     "  │ ▎",
-                    Style::default().fg(AppTheme::MODEL_TAG),
+                    Style::default().fg(AppTheme::MODEL_TAG).bg(AppTheme::CODE_BG),
                 )));
             } else {
                 lines.push(Line::from(Span::styled(
@@ -481,6 +507,9 @@ fn draw_status_bar(f: &mut Frame, area: Rect, state: &AppState) {
     let io_text = format!(" ↓{} ↑{} ", state.total_input_tokens, state.total_output_tokens);
     let cost_text = format!(" ￥{:.4} ", state.total_cost);
 
+    // 消息计数
+    let msg_text = format!(" ✉ {} ", state.messages.len());
+
     // 缓存命中率
     let effective_input = state.total_input_tokens + state.total_cache_read_tokens;
     let cache_text = if effective_input > 0 {
@@ -491,6 +520,7 @@ fn draw_status_bar(f: &mut Frame, area: Rect, state: &AppState) {
     };
 
     let mut spans = vec![
+        Span::styled(msg_text, Style::default().fg(AppTheme::STATUS_LABEL)),
         Span::styled(token_text, Style::default().fg(AppTheme::STATUS_DATA)),
         Span::styled(io_text, Style::default().fg(AppTheme::STATUS_LABEL)),
         Span::styled("  ", Style::default()),
@@ -562,6 +592,7 @@ fn draw_confirm_modal(f: &mut Frame, confirm: &crate::app::ConfirmState) {
     let title = match &confirm.action {
         ConfirmAction::WriteFile { .. } => " ⚠ 写入确认 ",
         ConfirmAction::EditFile { .. } => " ⚠ 编辑确认 ",
+        ConfirmAction::SendMessage { .. } => " ⚠ 发送确认 ",
         ConfirmAction::ClearChat => " ⚠ 清空确认 ",
         ConfirmAction::Quit => " ⚠ 退出确认 ",
     };
