@@ -28,7 +28,7 @@
 | 其他 | scopeguard, unicode-width, futures-util, dirs, anyhow | |
 
 编译命令：`cd C:/test/mimo-opt && cargo build`
-Rust 路径：`C:/Users/yansheng/.cargo/bin/`（可能不在 PATH 中，需 `export PATH="$PATH:/c/Users/yansheng/.cargo/bin"`）
+Rust 路径：`~/.cargo/bin/`（可能不在 PATH 中，需 `export PATH="$PATH:~/.cargo/bin"`）
 
 ---
 
@@ -131,7 +131,7 @@ app.rs 从 channel 收到 StreamResult → 更新 AppState → ui/draw.rs 渲染
 
 ## 6. 配置文件
 
-自动创建于：`C:\Users\yansheng\AppData\Roaming\mimo-opt\config.json`
+自动创建于：`~/.config/mimo-opt/config.json`（Windows: `%APPDATA%\mimo-opt\config.json`）
 
 ```json
 {
@@ -361,7 +361,7 @@ tokio::spawn(async move {
 
 ```bash
 # 设置 Rust PATH
-export PATH="$PATH:/c/Users/yansheng/.cargo/bin"
+export PATH="$PATH:~/.cargo/bin"
 
 # 编译
 cd C:/test/mimo-opt
@@ -371,7 +371,7 @@ cargo build
 cargo run
 
 # 编辑配置
-notepad "C:\Users\yansheng\AppData\Roaming\mimo-opt\config.json"
+notepad "%APPDATA%\mimo-opt\config.json"
 ```
 
 ---
