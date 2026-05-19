@@ -1,9 +1,33 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Content {
+    Text(String),
+}
+
+impl Content {
+    pub fn text(s: impl Into<String>) -> Self {
+        Content::Text(s.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Content::Text(s) => s,
+        }
+    }
+
+    pub fn as_mut_str(&mut self) -> &mut String {
+        match self {
+            Content::Text(s) => s,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
-    pub content: String,
+    pub content: Content,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_control: Option<CacheControl>,
 }
@@ -22,8 +46,10 @@ pub struct SystemContent {
     pub cache_control: CacheControl,
 }
 
+// ── Anthropic 格式 ──
+
 #[derive(Debug, Serialize)]
-pub struct ChatRequest {
+pub struct AnthropicRequest {
     pub model: String,
     pub max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -33,24 +59,57 @@ pub struct ChatRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct StreamEvent {
+pub struct AnthropicStreamEvent {
     #[serde(rename = "type")]
     pub event_type: String,
-    pub delta: Option<Delta>,
-    pub message: Option<StreamMessage>,
+    pub delta: Option<AnthropicDelta>,
+    pub message: Option<AnthropicStreamMessage>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Delta {
+pub struct AnthropicDelta {
     #[serde(rename = "type")]
     pub delta_type: String,
     pub text: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct StreamMessage {
+pub struct AnthropicStreamMessage {
     pub usage: Option<Usage>,
 }
+
+// ── OpenAI 格式 ──
+
+#[derive(Debug, Serialize)]
+pub struct OpenAIMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpenAIRequest {
+    pub model: String,
+    pub messages: Vec<OpenAIMessage>,
+    pub max_tokens: u32,
+    pub stream: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OpenAIStreamEvent {
+    pub choices: Option<Vec<OpenAIChoice>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OpenAIChoice {
+    pub delta: Option<OpenAIDelta>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OpenAIDelta {
+    pub content: Option<String>,
+}
+
+// ── 共用 ──
 
 #[derive(Debug, Deserialize)]
 pub struct Usage {

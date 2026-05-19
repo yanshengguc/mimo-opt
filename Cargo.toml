@@ -1,6 +1,6 @@
 [package]
 name = "mimo-opt"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "MiMo-OPT: 小米 MiMo API 终端聊天工具"
 
@@ -16,3 +16,5 @@ dirs = "6"
 anyhow = "1"
 scopeguard = "1"
 unicode-width = "0.2"
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+cli-clipboard = "0.4"
