@@ -15,16 +15,26 @@ use crate::config::Config;
 use crate::file_ops;
 use crate::session::{Session, SessionInfo};
 use crate::ui;
-use crate::util::{now_secs, get_cwd};
+use crate::util::{get_cwd, now_secs};
 
 const MAX_MESSAGES: usize = 200;
 const MESSAGE_WARN_THRESHOLD: usize = 160; // 80% of MAX
 
 #[derive(Clone)]
 pub enum ConfirmAction {
-    WriteFile { path: String, code: String, lang: String },
-    EditFile { path: String, old: String, new: String },
-    SendMessage { message: String },
+    WriteFile {
+        path: String,
+        code: String,
+        lang: String,
+    },
+    EditFile {
+        path: String,
+        old: String,
+        new: String,
+    },
+    SendMessage {
+        message: String,
+    },
     ClearChat,
     Quit,
 }
@@ -159,7 +169,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     };
 
     // 构建初始 system prompt（静态，不含日期）
-    state.system_prompt_text = build_system_prompt_text(&state.project_tree, &state.config.provider);
+    state.system_prompt_text =
+        build_system_prompt_text(&state.project_tree, &state.config.provider);
 
     // token 流 channel
     let (token_tx, mut token_rx) = mpsc::channel::<StreamResult>(256);
@@ -234,7 +245,9 @@ async fn run_loop(
                     }
                     state.error_message = Some(err.clone());
                     state.error_history.push(err.clone());
-                    if state.error_history.len() > 20 { state.error_history.remove(0); }
+                    if state.error_history.len() > 20 {
+                        state.error_history.remove(0);
+                    }
                     state.api_ok = Some(false);
                     state.api_error_detail = Some(err);
                     state.chat_scroll = 0;
@@ -256,10 +269,16 @@ async fn run_loop(
 
                 match key.code {
                     // 确认对话框 — y 确认 / n/Esc 取消 / d 显示详情
-                    KeyCode::Char('y') if state.pending_confirm.is_some() && !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    KeyCode::Char('y')
+                        if state.pending_confirm.is_some()
+                            && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
                         execute_confirm(state, client, token_tx);
                     }
-                    KeyCode::Char('n') if state.pending_confirm.is_some() && !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    KeyCode::Char('n')
+                        if state.pending_confirm.is_some()
+                            && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
                         if let Some(ref c) = state.pending_confirm {
                             if let ConfirmAction::SendMessage { ref message } = c.action {
                                 state.input = message.clone();
@@ -279,11 +298,17 @@ async fn run_loop(
                         state.pending_confirm = None;
                         push_cancelled_message(state);
                     }
-                    KeyCode::Char('d') if state.pending_confirm.is_some() && !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    KeyCode::Char('d')
+                        if state.pending_confirm.is_some()
+                            && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
                         show_confirm_detail(state);
                     }
                     // Ctrl+N: 新建会话
-                    KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) && state.pending_confirm.is_none() => {
+                    KeyCode::Char('n')
+                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                            && state.pending_confirm.is_none() =>
+                    {
                         save_session(state);
                         // 创建新会话
                         state.session = Session::new(Session::auto_name());
@@ -304,7 +329,8 @@ async fn run_loop(
                         state.session_list = Session::list();
                         if state.session_list.len() > 1 {
                             // 找到当前会话的位置，切换到下一个
-                            let current_idx = state.session_list
+                            let current_idx = state
+                                .session_list
                                 .iter()
                                 .position(|s| s.id == state.session.id)
                                 .unwrap_or(0);
@@ -336,24 +362,32 @@ async fn run_loop(
                         }
                     }
                     // Ctrl+C: 中断生成（不退出）
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) && state.pending_confirm.is_none()
-                        && state.generating => {
-                            // 发送取消信号
-                            if let Some(cancel_tx) = state.cancel_tx.take() {
-                                let _ = cancel_tx.send(());
-                            }
-                            state.generating = false;
-                            if !state.stream_buffer.is_empty() {
-                                state.messages.push(ChatMessage {
-                                    role: "assistant".to_string(),
-                                    content: Content::text(state.stream_buffer.clone()),
-                                    cache_control: None,
-                                });
-                                state.stream_buffer.clear();
-                            }
+                    KeyCode::Char('c')
+                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                            && state.pending_confirm.is_none()
+                            && state.generating =>
+                    {
+                        // 发送取消信号
+                        if let Some(cancel_tx) = state.cancel_tx.take() {
+                            let _ = cancel_tx.send(());
                         }
+                        state.generating = false;
+                        if !state.stream_buffer.is_empty() {
+                            state.messages.push(ChatMessage {
+                                role: "assistant".to_string(),
+                                content: Content::text(state.stream_buffer.clone()),
+                                cache_control: None,
+                            });
+                            state.stream_buffer.clear();
+                        }
+                    }
                     // Ctrl+V: 粘贴剪贴板内容
-                    KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) && !state.generating && !state.search_active && state.pending_confirm.is_none() => {
+                    KeyCode::Char('v')
+                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                            && !state.generating
+                            && !state.search_active
+                            && state.pending_confirm.is_none() =>
+                    {
                         match cli_clipboard::get_contents() {
                             Ok(text) => {
                                 // 插入到光标位置
@@ -367,20 +401,31 @@ async fn run_loop(
                         }
                     }
                     // Ctrl+F: 搜索模式
-                    KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) && state.pending_confirm.is_none()
-                        && !state.generating && !state.search_active => {
-                            state.search_active = true;
-                            state.search_query.clear();
-                            state.search_matches.clear();
-                            state.search_match_idx = 0;
-                        }
+                    KeyCode::Char('f')
+                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                            && state.pending_confirm.is_none()
+                            && !state.generating
+                            && !state.search_active =>
+                    {
+                        state.search_active = true;
+                        state.search_query.clear();
+                        state.search_matches.clear();
+                        state.search_match_idx = 0;
+                    }
                     // Ctrl+Y: 复制最后一个代码块到剪贴板
-                    KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) && state.pending_confirm.is_none() => {
+                    KeyCode::Char('y')
+                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                            && state.pending_confirm.is_none() =>
+                    {
                         collect_code_blocks(state);
                         if let Some((lang, content)) = state.code_blocks.last() {
                             match cli_clipboard::set_contents(content.clone()) {
                                 Ok(()) => {
-                                    state.copy_status = Some(format!("已复制 {} 代码块 ({} 行)", lang, content.lines().count()));
+                                    state.copy_status = Some(format!(
+                                        "已复制 {} 代码块 ({} 行)",
+                                        lang,
+                                        content.lines().count()
+                                    ));
                                 }
                                 Err(e) => {
                                     state.copy_status = Some(format!("复制失败: {}", e));
@@ -411,7 +456,10 @@ async fn run_loop(
                         }
                     }
                     // 搜索模式 — 输入/删除/跳转
-                    KeyCode::Char(ch) if state.search_active && !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    KeyCode::Char(ch)
+                        if state.search_active
+                            && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
                         state.search_query.push(ch);
                         do_search(state);
                     }
@@ -419,18 +467,18 @@ async fn run_loop(
                         state.search_query.pop();
                         do_search(state);
                     }
-                    KeyCode::Enter if state.search_active
-                        && !state.search_matches.is_empty() => {
-                            if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                if state.search_match_idx > 0 {
-                                    state.search_match_idx -= 1;
-                                } else {
-                                    state.search_match_idx = state.search_matches.len() - 1;
-                                }
+                    KeyCode::Enter if state.search_active && !state.search_matches.is_empty() => {
+                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            if state.search_match_idx > 0 {
+                                state.search_match_idx -= 1;
                             } else {
-                                state.search_match_idx = (state.search_match_idx + 1) % state.search_matches.len();
+                                state.search_match_idx = state.search_matches.len() - 1;
                             }
+                        } else {
+                            state.search_match_idx =
+                                (state.search_match_idx + 1) % state.search_matches.len();
                         }
+                    }
                     // PageUp/PageDown: 聊天区滚动
                     KeyCode::PageUp if !state.generating && !state.search_active => {
                         state.chat_scroll = state.chat_scroll.saturating_add(10);
@@ -442,400 +490,438 @@ async fn run_loop(
                         state.chat_scroll = 0;
                     }
                     // Ctrl+Enter: 发送消息或执行技能
-                    KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) && state.pending_confirm.is_none()
-                        && !state.input.is_empty() && !state.generating => {
-                            // 长消息发送确认（>5 行）
-                            if !state.input.starts_with('/') && state.input.lines().count() > 5 {
-                                let msg = state.input.clone();
-                                state.pending_confirm = Some(ConfirmState {
-                                    action: ConfirmAction::SendMessage { message: msg },
-                                    detail: format!("{} 行消息，确认发送？", state.input.lines().count()),
-                                });
-                                state.input.clear();
-                                state.cursor_pos = 0;
-                                break;
-                            }
-                            let user_msg = state.input.clone();
+                    KeyCode::Enter
+                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                            && state.pending_confirm.is_none()
+                            && !state.input.is_empty()
+                            && !state.generating =>
+                    {
+                        // 长消息发送确认（>5 行）
+                        if !state.input.starts_with('/') && state.input.lines().count() > 5 {
+                            let msg = state.input.clone();
+                            state.pending_confirm = Some(ConfirmState {
+                                action: ConfirmAction::SendMessage { message: msg },
+                                detail: format!(
+                                    "{} 行消息，确认发送？",
+                                    state.input.lines().count()
+                                ),
+                            });
                             state.input.clear();
                             state.cursor_pos = 0;
-                            state.error_message = None;
-                            // 记录到输入历史
-                            state.input_history.push(user_msg.clone());
-                            state.history_idx = None;
-                            state.input_draft.clear();
+                            break;
+                        }
+                        let user_msg = state.input.clone();
+                        state.input.clear();
+                        state.cursor_pos = 0;
+                        state.error_message = None;
+                        // 记录到输入历史
+                        state.input_history.push(user_msg.clone());
+                        state.history_idx = None;
+                        state.input_draft.clear();
 
-                            if let Some(stripped) = user_msg.strip_prefix('/') {
-                                // 技能执行
-                                let after_slash = stripped.to_string();
-                                let mut parts_iter = after_slash.splitn(2, ' ');
-                                let skill_name = parts_iter.next().unwrap_or("").to_string();
-                                let args = parts_iter.next().unwrap_or("").to_string();
+                        if let Some(stripped) = user_msg.strip_prefix('/') {
+                            // 技能执行
+                            let after_slash = stripped.to_string();
+                            let mut parts_iter = after_slash.splitn(2, ' ');
+                            let skill_name = parts_iter.next().unwrap_or("").to_string();
+                            let args = parts_iter.next().unwrap_or("").to_string();
 
-                                // /help 列出全部技能
-                                if skill_name == "help" {
-                                    let mut help_text = String::from("可用命令:\n  /read <path>[:start[-end]]  读取文件\n  /write <path>              写入最近代码块（需确认）\n  /edit <path> <old> <new>    编辑文件（需确认）\n  /export [path]             导出会话为 Markdown\n  /clear                     清空对话（需确认）\n  /model <name>              切换模型\n  /provider <name>           切换 API 提供商\n  /skills                    查看技能列表\n  /addskill <name> <cmd>     添加技能\n  /rmskill <name>            删除技能\n  /errors                    查看错误历史\n\n技能:\n");
-                                    let mut names: Vec<&String> = state.skills.keys().collect();
-                                    names.sort();
-                                    for name in &names {
-                                        help_text.push_str(&format!("  /{}\n", name));
-                                    }
-                                    help_text.push_str("\n支持参数: /skill_name args");
+                            // /help 列出全部技能
+                            if skill_name == "help" {
+                                let mut help_text = String::from("可用命令:\n  /read <path>[:start[-end]]  读取文件\n  /write <path>              写入最近代码块（需确认）\n  /edit <path> <old> <new>    编辑文件（需确认）\n  /export [path]             导出会话为 Markdown\n  /clear                     清空对话（需确认）\n  /model <name>              切换模型\n  /provider <name>           切换 API 提供商\n  /skills                    查看技能列表\n  /addskill <name> <cmd>     添加技能\n  /rmskill <name>            删除技能\n  /errors                    查看错误历史\n\n技能:\n");
+                                let mut names: Vec<&String> = state.skills.keys().collect();
+                                names.sort();
+                                for name in &names {
+                                    help_text.push_str(&format!("  /{}\n", name));
+                                }
+                                help_text.push_str("\n支持参数: /skill_name args");
+                                state.messages.push(ChatMessage {
+                                    role: "assistant".to_string(),
+                                    content: Content::text(help_text),
+                                    cache_control: None,
+                                });
+                            } else if skill_name == "read" {
+                                handle_read_command(state, &args, client, token_tx);
+                            } else if skill_name == "write" {
+                                handle_write_command(state, &args, client, token_tx);
+                            } else if skill_name == "edit" {
+                                handle_edit_command(state, &args, client, token_tx);
+                            } else if skill_name == "clear" {
+                                if !state.messages.is_empty() {
+                                    state.pending_confirm = Some(ConfirmState {
+                                        action: ConfirmAction::ClearChat,
+                                        detail: format!(
+                                            "清空 {} 条对话（不可恢复）",
+                                            state.messages.len()
+                                        ),
+                                    });
+                                }
+                            } else if skill_name == "export" {
+                                handle_export_command(state, &args);
+                            } else if skill_name == "errors" {
+                                if state.error_history.is_empty() {
                                     state.messages.push(ChatMessage {
                                         role: "assistant".to_string(),
-                                        content: Content::text(help_text),
+                                        content: Content::text("无错误记录".to_string()),
                                         cache_control: None,
                                     });
-                                } else if skill_name == "read" {
-                                    handle_read_command(state, &args, client, token_tx);
-                                } else if skill_name == "write" {
-                                    handle_write_command(state, &args, client, token_tx);
-                                } else if skill_name == "edit" {
-                                    handle_edit_command(state, &args, client, token_tx);
-                                } else if skill_name == "clear" {
-                                    if !state.messages.is_empty() {
-                                        state.pending_confirm = Some(ConfirmState {
-                                            action: ConfirmAction::ClearChat,
-                                            detail: format!("清空 {} 条对话（不可恢复）", state.messages.len()),
-                                        });
+                                } else {
+                                    let mut text =
+                                        format!("最近 {} 条错误:\n", state.error_history.len());
+                                    for (i, err) in state.error_history.iter().enumerate() {
+                                        text.push_str(&format!("  {}. {}\n", i + 1, err));
                                     }
-                                } else if skill_name == "export" {
-                                    handle_export_command(state, &args);
-                                } else if skill_name == "errors" {
-                                    if state.error_history.is_empty() {
-                                        state.messages.push(ChatMessage {
-                                            role: "assistant".to_string(),
-                                            content: Content::text("无错误记录".to_string()),
-                                            cache_control: None,
-                                        });
-                                    } else {
-                                        let mut text = format!("最近 {} 条错误:\n", state.error_history.len());
-                                        for (i, err) in state.error_history.iter().enumerate() {
-                                            text.push_str(&format!("  {}. {}\n", i + 1, err));
-                                        }
-                                        state.messages.push(ChatMessage {
-                                            role: "assistant".to_string(),
-                                            content: Content::text(text),
-                                            cache_control: None,
-                                        });
-                                    }
-                                } else if skill_name == "skills" {
-                                    let mut text = format!("技能列表 ({} 个):\n", state.skills.len());
-                                    let mut names: Vec<(&String, &String)> = state.skills.iter().collect();
-                                    names.sort_by_key(|(k, _)| (*k).clone());
-                                    for (name, cmd) in &names {
-                                        text.push_str(&format!("  /{} → {}\n", name, cmd));
-                                    }
-                                    text.push_str("\n/addskill <name> <cmd>  添加\n/rmskill <name>         删除");
                                     state.messages.push(ChatMessage {
                                         role: "assistant".to_string(),
                                         content: Content::text(text),
                                         cache_control: None,
                                     });
-                                } else if skill_name == "addskill" {
-                                    let parts: Vec<&str> = args.splitn(2, ' ').collect();
-                                    if parts.len() < 2 {
-                                        state.error_message = Some("用法: /addskill <name> <command>".into());
-                                    } else {
-                                        let name = parts[0].to_string();
-                                        let cmd = parts[1].to_string();
-                                        state.skills.insert(name.clone(), cmd.clone());
-                                        state.config.skills = state.skills.clone();
-                                        match state.config.save() {
-                                            Ok(()) => {
-                                                state.messages.push(ChatMessage {
-                                                    role: "assistant".to_string(),
-                                                    content: Content::text(format!("✓ 已添加 /{} → {}", name, cmd)),
-                                                    cache_control: None,
-                                                });
-                                            }
-                                            Err(e) => {
-                                                state.error_message = Some(format!("保存配置失败: {}", e));
-                                            }
-                                        }
-                                    }
-                                } else if skill_name == "rmskill" {
-                                    if args.is_empty() {
-                                        state.error_message = Some("用法: /rmskill <name>".into());
-                                    } else if state.skills.remove(&args).is_some() {
-                                        state.config.skills = state.skills.clone();
-                                        match state.config.save() {
-                                            Ok(()) => {
-                                                state.messages.push(ChatMessage {
-                                                    role: "assistant".to_string(),
-                                                    content: Content::text(format!("✓ 已删除 /{}", args)),
-                                                    cache_control: None,
-                                                });
-                                            }
-                                            Err(e) => {
-                                                state.error_message = Some(format!("保存配置失败: {}", e));
-                                            }
-                                        }
-                                    } else {
-                                        state.error_message = Some(format!("技能 /{} 不存在", args));
-                                    }
-                                } else if skill_name == "model" {
-                                    if args.is_empty() {
-                                        state.error_message = Some("用法: /model <model_name>".into());
-                                    } else {
-                                        let new_model = args.clone();
-                                        state.config.model = new_model.clone();
-                                        client.set_model(new_model.clone());
-                                        state.config.save().ok();
-                                        state.messages.push(ChatMessage {
-                                            role: "assistant".to_string(),
-                                            content: Content::text(format!(
-                                                "✓ 模型已切换为 {}", new_model
-                                            )),
-                                            cache_control: None,
-                                        });
-                                    }
-                                } else if skill_name == "provider" {
-                                    if args.is_empty() {
-                                        let mut list = String::from("可用 provider 预设:\n");
-                                        for p in crate::config::PROVIDERS {
-                                            list.push_str(&format!(
-                                                "  {} — {} ({})\n",
-                                                p.name, p.model, p.base_url
-                                            ));
-                                        }
-                                        list.push_str("\n用法: /provider <name>");
-                                        state.messages.push(ChatMessage {
-                                            role: "assistant".to_string(),
-                                            content: Content::text(list),
-                                            cache_control: None,
-                                        });
-                                    } else if let Some(preset) = crate::config::Config::find_preset(&args) {
-                                        let api_key = state.config.api_key.clone();
-                                        state.config.provider = preset.name.to_string();
-                                        state.config.base_url = preset.base_url.to_string();
-                                        state.config.model = preset.model.to_string();
-                                        state.config.auth_type = preset.auth_type.to_string();
-                                        state.config.api_format = preset.api_format.to_string();
-                                        client.update_for_provider(preset, api_key);
-                                        // 重建 system prompt（不同 provider 有不同 AI 身份）
-                                        state.system_prompt_text =
-                                            build_system_prompt_text(&state.project_tree, &state.config.provider);
-                                        state.config.save().ok();
-                                        state.messages.push(ChatMessage {
-                                            role: "assistant".to_string(),
-                                            content: Content::text(format!(
-                                                "✓ 已切换到 {} ({})\nbase_url: {}\nmodel: {}",
-                                                preset.name, preset.model, preset.base_url, state.config.model
-                                            )),
-                                            cache_control: None,
-                                        });
-                                    } else {
-                                        state.error_message = Some(format!(
-                                            "未知 provider: {}。可用: {}",
-                                            args,
-                                            crate::config::PROVIDERS
-                                                .iter()
-                                                .map(|p| p.name)
-                                                .collect::<Vec<_>>()
-                                                .join(", ")
-                                        ));
-                                    }
-                                } else if let Some(cmd_tpl) = state.skills.get(&skill_name).cloned() {
-                                    // 参数替换（args 做 shell 转义防注入）
-                                    let cmd = if cmd_tpl.contains("{args}") {
-                                        cmd_tpl.replace("{args}", &shell_escape(&args))
-                                    } else if !args.is_empty() {
-                                        format!("{} {}", cmd_tpl, shell_escape(&args))
-                                    } else {
-                                        cmd_tpl
-                                    };
-
-                                    state.generating = true;
-                                    state.stream_buffer.clear();
-                                    state.spinner_tick = 0;
-
-                                    let client = Arc::clone(client);
-                                    let tx = token_tx.clone();
-                                    let messages_clone = state.messages.clone();
-                                    let system_text = state.system_prompt_text.clone();
-                                    let skill_name_owned = skill_name.clone();
-                                    let (cancel_tx, cancel_rx) = oneshot::channel();
-                                    state.cancel_tx = Some(cancel_tx);
-
-                                    tokio::spawn(async move {
-                                        let shell = if cfg!(target_os = "windows") {
-                                            "cmd"
-                                        } else {
-                                            "sh"
-                                        };
-                                        let shell_flag = if cfg!(target_os = "windows") {
-                                            "/C"
-                                        } else {
-                                            "-c"
-                                        };
-
-                                        let start = Instant::now();
-                                        let output =
-                                            tokio::process::Command::new(shell)
-                                                .arg(shell_flag)
-                                                .arg(&cmd)
-                                                .output()
-                                                .await;
-                                        let elapsed = start.elapsed();
-
-                                        match output {
-                                            Ok(out) => {
-                                                let stdout =
-                                                    String::from_utf8_lossy(&out.stdout);
-                                                let stderr =
-                                                    String::from_utf8_lossy(&out.stderr);
-                                                let mut result = stdout.to_string();
-                                                if !stderr.is_empty() {
-                                                    result
-                                                        .push_str(&format!("\n[stderr]\n{}", stderr));
-                                                }
-                                                if !out.status.success() {
-                                                    result.push_str(&format!(
-                                                        "\n[exit code: {}]",
-                                                        out.status
-                                                            .code()
-                                                            .map_or(-1, |c| c)
-                                                    ));
-                                                }
-
-                                                // 输出截断
-                                                let truncated = result.len() > 2000;
-                                                if truncated {
-                                                    result.truncate(2000);
-                                                    result.push_str("\n... (truncated)");
-                                                }
-
-                                                let display = format!(
-                                                    "/{} output ({}ms):\n{}",
-                                                    skill_name_owned,
-                                                    elapsed.as_millis(),
-                                                    result
-                                                );
-                                                let _ = tx.send(StreamResult::Token(display)).await;
-
-                                                // 用技能输出作为用户消息，发送给 MiMo 分析
-                                                let mut msgs = messages_clone;
-                                                msgs.push(ChatMessage {
-                                                    role: "user".to_string(),
-                                                    content: Content::text(format!(
-                                                        "请分析以下 /{} 命令的输出:\n{}",
-                                                        skill_name_owned, result
-                                                    )),
-                                                    cache_control: None,
-                                                });
-                                                apply_cache_breakpoints(&mut msgs);
-                                                let system_content =
-                                                    build_system_content(&system_text);
-
-                                                tokio::select! {
-                                                    r = client.send_message_stream(
-                                                        &system_content,
-                                                        &msgs,
-                                                        tx.clone(),
-                                                    ) => {
-                                                        if let Err(e) = r {
-                                                            let _ = tx.send(StreamResult::Error(e.to_string())).await;
-                                                        }
-                                                    }
-                                                    _ = cancel_rx => {}
-                                                }
-                                            }
-                                            Err(e) => {
-                                                let _ = tx.send(StreamResult::Error(format!(
-                                                    "/{} 执行失败: {}",
-                                                    skill_name_owned, e
-                                                ))).await;
-                                            }
-                                        }
-                                    });
-                                } else {
-                                    state.error_message =
-                                        Some(format!("未知技能: /{}", skill_name));
                                 }
-                            } else {
-                                // 普通消息发送
+                            } else if skill_name == "skills" {
+                                let mut text = format!("技能列表 ({} 个):\n", state.skills.len());
+                                let mut names: Vec<(&String, &String)> =
+                                    state.skills.iter().collect();
+                                names.sort_by_key(|(k, _)| (*k).clone());
+                                for (name, cmd) in &names {
+                                    text.push_str(&format!("  /{} → {}\n", name, cmd));
+                                }
+                                text.push_str(
+                                    "\n/addskill <name> <cmd>  添加\n/rmskill <name>         删除",
+                                );
                                 state.messages.push(ChatMessage {
-                                    role: "user".to_string(),
-                                    content: Content::text(user_msg),
+                                    role: "assistant".to_string(),
+                                    content: Content::text(text),
                                     cache_control: None,
                                 });
-
-                                // 长对话自动截断
-                                maybe_truncate_messages(state);
-                                if state.messages.len() >= MESSAGE_WARN_THRESHOLD {
+                            } else if skill_name == "addskill" {
+                                let parts: Vec<&str> = args.splitn(2, ' ').collect();
+                                if parts.len() < 2 {
+                                    state.error_message =
+                                        Some("用法: /addskill <name> <command>".into());
+                                } else {
+                                    let name = parts[0].to_string();
+                                    let cmd = parts[1].to_string();
+                                    state.skills.insert(name.clone(), cmd.clone());
+                                    state.config.skills = state.skills.clone();
+                                    match state.config.save() {
+                                        Ok(()) => {
+                                            state.messages.push(ChatMessage {
+                                                role: "assistant".to_string(),
+                                                content: Content::text(format!(
+                                                    "✓ 已添加 /{} → {}",
+                                                    name, cmd
+                                                )),
+                                                cache_control: None,
+                                            });
+                                        }
+                                        Err(e) => {
+                                            state.error_message =
+                                                Some(format!("保存配置失败: {}", e));
+                                        }
+                                    }
+                                }
+                            } else if skill_name == "rmskill" {
+                                if args.is_empty() {
+                                    state.error_message = Some("用法: /rmskill <name>".into());
+                                } else if state.skills.remove(&args).is_some() {
+                                    state.config.skills = state.skills.clone();
+                                    match state.config.save() {
+                                        Ok(()) => {
+                                            state.messages.push(ChatMessage {
+                                                role: "assistant".to_string(),
+                                                content: Content::text(format!(
+                                                    "✓ 已删除 /{}",
+                                                    args
+                                                )),
+                                                cache_control: None,
+                                            });
+                                        }
+                                        Err(e) => {
+                                            state.error_message =
+                                                Some(format!("保存配置失败: {}", e));
+                                        }
+                                    }
+                                } else {
+                                    state.error_message = Some(format!("技能 /{} 不存在", args));
+                                }
+                            } else if skill_name == "model" {
+                                if args.is_empty() {
+                                    state.error_message = Some("用法: /model <model_name>".into());
+                                } else {
+                                    let new_model = args.clone();
+                                    state.config.model = new_model.clone();
+                                    client.set_model(new_model.clone());
+                                    state.config.save().ok();
+                                    state.messages.push(ChatMessage {
+                                        role: "assistant".to_string(),
+                                        content: Content::text(format!(
+                                            "✓ 模型已切换为 {}",
+                                            new_model
+                                        )),
+                                        cache_control: None,
+                                    });
+                                }
+                            } else if skill_name == "provider" {
+                                if args.is_empty() {
+                                    let mut list = String::from("可用 provider 预设:\n");
+                                    for p in crate::config::PROVIDERS {
+                                        list.push_str(&format!(
+                                            "  {} — {} ({})\n",
+                                            p.name, p.model, p.base_url
+                                        ));
+                                    }
+                                    list.push_str("\n用法: /provider <name>");
+                                    state.messages.push(ChatMessage {
+                                        role: "assistant".to_string(),
+                                        content: Content::text(list),
+                                        cache_control: None,
+                                    });
+                                } else if let Some(preset) =
+                                    crate::config::Config::find_preset(&args)
+                                {
+                                    let api_key = state.config.api_key.clone();
+                                    state.config.provider = preset.name.to_string();
+                                    state.config.base_url = preset.base_url.to_string();
+                                    state.config.model = preset.model.to_string();
+                                    state.config.auth_type = preset.auth_type.to_string();
+                                    state.config.api_format = preset.api_format.to_string();
+                                    client.update_for_provider(preset, api_key);
+                                    // 重建 system prompt（不同 provider 有不同 AI 身份）
+                                    state.system_prompt_text = build_system_prompt_text(
+                                        &state.project_tree,
+                                        &state.config.provider,
+                                    );
+                                    state.config.save().ok();
+                                    state.messages.push(ChatMessage {
+                                        role: "assistant".to_string(),
+                                        content: Content::text(format!(
+                                            "✓ 已切换到 {} ({})\nbase_url: {}\nmodel: {}",
+                                            preset.name,
+                                            preset.model,
+                                            preset.base_url,
+                                            state.config.model
+                                        )),
+                                        cache_control: None,
+                                    });
+                                } else {
                                     state.error_message = Some(format!(
-                                        "消息数 {}/{}，接近上限",
-                                        state.messages.len(),
-                                        MAX_MESSAGES
+                                        "未知 provider: {}。可用: {}",
+                                        args,
+                                        crate::config::PROVIDERS
+                                            .iter()
+                                            .map(|p| p.name)
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
                                     ));
                                 }
+                            } else if let Some(cmd_tpl) = state.skills.get(&skill_name).cloned() {
+                                // 参数替换（args 做 shell 转义防注入）
+                                let cmd = if cmd_tpl.contains("{args}") {
+                                    cmd_tpl.replace("{args}", &shell_escape(&args))
+                                } else if !args.is_empty() {
+                                    format!("{} {}", cmd_tpl, shell_escape(&args))
+                                } else {
+                                    cmd_tpl
+                                };
 
                                 state.generating = true;
                                 state.stream_buffer.clear();
                                 state.spinner_tick = 0;
 
-                                // 首条 user 消息注入日期
-                                if let Some(first) = state.messages.first() {
-                                    if first.role == "user" && !first.content.as_str().contains("[Current date:") {
-                                        let today = chrono_date();
-                                        state.messages[0].content.as_mut_str().push_str(
-                                            &format!("\n\n[Current date: {}]", today)
-                                        );
-                                    }
-                                }
-
-                                let system_text = state.system_prompt_text.clone();
-
-                                let mut messages = state.messages.clone();
-                                apply_cache_breakpoints(&mut messages);
-
-                                let system_content = build_system_content(&system_text);
-
                                 let client = Arc::clone(client);
                                 let tx = token_tx.clone();
+                                let messages_clone = state.messages.clone();
+                                let system_text = state.system_prompt_text.clone();
+                                let skill_name_owned = skill_name.clone();
                                 let (cancel_tx, cancel_rx) = oneshot::channel();
                                 state.cancel_tx = Some(cancel_tx);
 
                                 tokio::spawn(async move {
-                                    tokio::select! {
-                                        result = client.send_message_stream(&system_content, &messages, tx.clone()) => {
-                                            if let Err(e) = result {
-                                                let _ = tx.send(StreamResult::Error(e.to_string())).await;
+                                    let shell = if cfg!(target_os = "windows") {
+                                        "cmd"
+                                    } else {
+                                        "sh"
+                                    };
+                                    let shell_flag = if cfg!(target_os = "windows") {
+                                        "/C"
+                                    } else {
+                                        "-c"
+                                    };
+
+                                    let start = Instant::now();
+                                    let output = tokio::process::Command::new(shell)
+                                        .arg(shell_flag)
+                                        .arg(&cmd)
+                                        .output()
+                                        .await;
+                                    let elapsed = start.elapsed();
+
+                                    match output {
+                                        Ok(out) => {
+                                            let stdout = String::from_utf8_lossy(&out.stdout);
+                                            let stderr = String::from_utf8_lossy(&out.stderr);
+                                            let mut result = stdout.to_string();
+                                            if !stderr.is_empty() {
+                                                result.push_str(&format!("\n[stderr]\n{}", stderr));
+                                            }
+                                            if !out.status.success() {
+                                                result.push_str(&format!(
+                                                    "\n[exit code: {}]",
+                                                    out.status.code().map_or(-1, |c| c)
+                                                ));
+                                            }
+
+                                            // 输出截断
+                                            let truncated = result.len() > 2000;
+                                            if truncated {
+                                                result.truncate(2000);
+                                                result.push_str("\n... (truncated)");
+                                            }
+
+                                            let display = format!(
+                                                "/{} output ({}ms):\n{}",
+                                                skill_name_owned,
+                                                elapsed.as_millis(),
+                                                result
+                                            );
+                                            let _ = tx.send(StreamResult::Token(display)).await;
+
+                                            // 用技能输出作为用户消息，发送给 MiMo 分析
+                                            let mut msgs = messages_clone;
+                                            msgs.push(ChatMessage {
+                                                role: "user".to_string(),
+                                                content: Content::text(format!(
+                                                    "请分析以下 /{} 命令的输出:\n{}",
+                                                    skill_name_owned, result
+                                                )),
+                                                cache_control: None,
+                                            });
+                                            apply_cache_breakpoints(&mut msgs);
+                                            let system_content = build_system_content(&system_text);
+
+                                            tokio::select! {
+                                                r = client.send_message_stream(
+                                                    &system_content,
+                                                    &msgs,
+                                                    tx.clone(),
+                                                ) => {
+                                                    if let Err(e) = r {
+                                                        let _ = tx.send(StreamResult::Error(e.to_string())).await;
+                                                    }
+                                                }
+                                                _ = cancel_rx => {}
                                             }
                                         }
-                                        _ = cancel_rx => {}
+                                        Err(e) => {
+                                            let _ = tx
+                                                .send(StreamResult::Error(format!(
+                                                    "/{} 执行失败: {}",
+                                                    skill_name_owned, e
+                                                )))
+                                                .await;
+                                        }
                                     }
                                 });
+                            } else {
+                                state.error_message = Some(format!("未知技能: /{}", skill_name));
                             }
+                        } else {
+                            // 普通消息发送
+                            state.messages.push(ChatMessage {
+                                role: "user".to_string(),
+                                content: Content::text(user_msg),
+                                cache_control: None,
+                            });
+
+                            // 长对话自动截断
+                            maybe_truncate_messages(state);
+                            if state.messages.len() >= MESSAGE_WARN_THRESHOLD {
+                                state.error_message = Some(format!(
+                                    "消息数 {}/{}，接近上限",
+                                    state.messages.len(),
+                                    MAX_MESSAGES
+                                ));
+                            }
+
+                            state.generating = true;
+                            state.stream_buffer.clear();
+                            state.spinner_tick = 0;
+
+                            // 首条 user 消息注入日期
+                            if let Some(first) = state.messages.first() {
+                                if first.role == "user"
+                                    && !first.content.as_str().contains("[Current date:")
+                                {
+                                    let today = chrono_date();
+                                    state.messages[0]
+                                        .content
+                                        .as_mut_str()
+                                        .push_str(&format!("\n\n[Current date: {}]", today));
+                                }
+                            }
+
+                            let system_text = state.system_prompt_text.clone();
+
+                            let mut messages = state.messages.clone();
+                            apply_cache_breakpoints(&mut messages);
+
+                            let system_content = build_system_content(&system_text);
+
+                            let client = Arc::clone(client);
+                            let tx = token_tx.clone();
+                            let (cancel_tx, cancel_rx) = oneshot::channel();
+                            state.cancel_tx = Some(cancel_tx);
+
+                            tokio::spawn(async move {
+                                tokio::select! {
+                                    result = client.send_message_stream(&system_content, &messages, tx.clone()) => {
+                                        if let Err(e) = result {
+                                            let _ = tx.send(StreamResult::Error(e.to_string())).await;
+                                        }
+                                    }
+                                    _ = cancel_rx => {}
+                                }
+                            });
                         }
+                    }
                     // 输入字符（非搜索模式、非确认状态）
-                    KeyCode::Char(ch) if !state.generating && !state.search_active && state.pending_confirm.is_none() && !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    KeyCode::Char(ch)
+                        if !state.generating
+                            && !state.search_active
+                            && state.pending_confirm.is_none()
+                            && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
                         state.input.insert(state.cursor_pos, ch);
                         state.cursor_pos += ch.len_utf8();
                         update_hint_lines(state);
                     }
                     // 退格
-                    KeyCode::Backspace if !state.generating && !state.search_active
-                        && state.cursor_pos > 0 => {
-                            let prev = state.input[..state.cursor_pos]
-                                .chars()
-                                .next_back()
-                                .map(|c| state.cursor_pos - c.len_utf8())
-                                .unwrap_or(0);
-                            state.input.remove(prev);
-                            state.cursor_pos = prev;
-                            update_hint_lines(state);
-                        }
+                    KeyCode::Backspace
+                        if !state.generating && !state.search_active && state.cursor_pos > 0 =>
+                    {
+                        let prev = state.input[..state.cursor_pos]
+                            .chars()
+                            .next_back()
+                            .map(|c| state.cursor_pos - c.len_utf8())
+                            .unwrap_or(0);
+                        state.input.remove(prev);
+                        state.cursor_pos = prev;
+                        update_hint_lines(state);
+                    }
                     // Delete
-                    KeyCode::Delete if !state.generating && !state.search_active
-                        && state.cursor_pos < state.input.len() => {
-                            state.input.remove(state.cursor_pos);
-                            update_hint_lines(state);
-                        }
+                    KeyCode::Delete
+                        if !state.generating
+                            && !state.search_active
+                            && state.cursor_pos < state.input.len() =>
+                    {
+                        state.input.remove(state.cursor_pos);
+                        update_hint_lines(state);
+                    }
                     // Ctrl+A
                     KeyCode::Char('a')
                         if key.modifiers.contains(KeyModifiers::CONTROL)
-                            && !state.generating && !state.search_active =>
+                            && !state.generating
+                            && !state.search_active =>
                     {
                         state.cursor_pos = 0;
                     }
@@ -845,29 +931,29 @@ async fn run_loop(
                     }
                     KeyCode::Char('e')
                         if key.modifiers.contains(KeyModifiers::CONTROL)
-                            && !state.generating && !state.search_active =>
+                            && !state.generating
+                            && !state.search_active =>
                     {
                         state.cursor_pos = state.input.len();
                     }
                     // 上箭头 — 浏览输入历史
-                    KeyCode::Up if !state.generating
-                        && !state.input_history.is_empty() => {
-                            match state.history_idx {
-                                None => {
-                                    state.input_draft = state.input.clone();
-                                    state.history_idx = Some(state.input_history.len() - 1);
-                                    state.input = state.input_history.last().unwrap().clone();
-                                    state.cursor_pos = state.input.len();
-                                }
-                                Some(0) => {}
-                                Some(idx) => {
-                                    state.history_idx = Some(idx - 1);
-                                    state.input = state.input_history[idx - 1].clone();
-                                    state.cursor_pos = state.input.len();
-                                }
+                    KeyCode::Up if !state.generating && !state.input_history.is_empty() => {
+                        match state.history_idx {
+                            None => {
+                                state.input_draft = state.input.clone();
+                                state.history_idx = Some(state.input_history.len() - 1);
+                                state.input = state.input_history.last().unwrap().clone();
+                                state.cursor_pos = state.input.len();
                             }
-                            update_hint_lines(state);
+                            Some(0) => {}
+                            Some(idx) => {
+                                state.history_idx = Some(idx - 1);
+                                state.input = state.input_history[idx - 1].clone();
+                                state.cursor_pos = state.input.len();
+                            }
                         }
+                        update_hint_lines(state);
+                    }
                     // 下箭头 — 前进到更新的历史
                     KeyCode::Down if !state.generating => {
                         if let Some(idx) = state.history_idx {
@@ -883,25 +969,23 @@ async fn run_loop(
                         }
                     }
                     // 左箭头
-                    KeyCode::Left if !state.generating
-                        && state.cursor_pos > 0 => {
-                            let prev = state.input[..state.cursor_pos]
-                                .chars()
-                                .next_back()
-                                .map(|c| state.cursor_pos - c.len_utf8())
-                                .unwrap_or(0);
-                            state.cursor_pos = prev;
-                        }
+                    KeyCode::Left if !state.generating && state.cursor_pos > 0 => {
+                        let prev = state.input[..state.cursor_pos]
+                            .chars()
+                            .next_back()
+                            .map(|c| state.cursor_pos - c.len_utf8())
+                            .unwrap_or(0);
+                        state.cursor_pos = prev;
+                    }
                     // 右箭头
-                    KeyCode::Right if !state.generating
-                        && state.cursor_pos < state.input.len() => {
-                            let next = state.input[state.cursor_pos..]
-                                .chars()
-                                .next()
-                                .map(|c| state.cursor_pos + c.len_utf8())
-                                .unwrap_or(state.input.len());
-                            state.cursor_pos = next;
-                        }
+                    KeyCode::Right if !state.generating && state.cursor_pos < state.input.len() => {
+                        let next = state.input[state.cursor_pos..]
+                            .chars()
+                            .next()
+                            .map(|c| state.cursor_pos + c.len_utf8())
+                            .unwrap_or(state.input.len());
+                        state.cursor_pos = next;
+                    }
                     _ => {}
                 }
             }
@@ -930,9 +1014,10 @@ fn maybe_truncate_messages(state: &mut AppState) {
             if let Some(first) = state.messages.first_mut() {
                 if !first.content.as_str().contains("[Current date:") {
                     let today = chrono_date();
-                    first.content.as_mut_str().push_str(
-                        &format!("\n\n[Current date: {}]", today)
-                    );
+                    first
+                        .content
+                        .as_mut_str()
+                        .push_str(&format!("\n\n[Current date: {}]", today));
                 }
             }
         }
@@ -988,7 +1073,20 @@ fn chrono_from_days(days: u64) -> (u64, u64, u64) {
         d -= days_in_year;
         y += 1;
     }
-    let months = [31, if is_leap(y) { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let months = [
+        31,
+        if is_leap(y) { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut m = 0u64;
     for (i, &days_in_month) in months.iter().enumerate() {
         if d < days_in_month {
@@ -1010,15 +1108,23 @@ fn build_system_prompt_text(project_tree: &str, provider: &str) -> String {
     match provider {
         "deepseek" => {
             text.push_str("You are DeepSeek, a helpful AI assistant created by DeepSeek. ");
-            text.push_str("You can help with coding, analysis, writing, math, and general Q&A.\n\n");
+            text.push_str(
+                "You can help with coding, analysis, writing, math, and general Q&A.\n\n",
+            );
         }
         "openai" => {
             text.push_str("You are ChatGPT, a helpful AI assistant created by OpenAI. ");
-            text.push_str("You can help with coding, analysis, writing, math, and general Q&A.\n\n");
+            text.push_str(
+                "You can help with coding, analysis, writing, math, and general Q&A.\n\n",
+            );
         }
         _ => {
-            text.push_str("You are MiMo, a helpful AI assistant created by Xiaomi's LLM-Core team. ");
-            text.push_str("You can help with coding, analysis, writing, math, and general Q&A.\n\n");
+            text.push_str(
+                "You are MiMo, a helpful AI assistant created by Xiaomi's LLM-Core team. ",
+            );
+            text.push_str(
+                "You can help with coding, analysis, writing, math, and general Q&A.\n\n",
+            );
         }
     }
     text.push_str("## Output Format\n");
@@ -1074,14 +1180,19 @@ fn update_hint_lines(state: &mut AppState) {
             let mut hints: Vec<String> = Vec::new();
 
             // 内置命令
-            for cmd in &["read", "write", "edit", "clear", "model", "provider", "skills", "addskill", "rmskill", "help"] {
+            for cmd in &[
+                "read", "write", "edit", "clear", "model", "provider", "skills", "addskill",
+                "rmskill", "help",
+            ] {
                 if cmd.starts_with(&prefix) && *cmd != prefix {
                     hints.push(format!("/{}", cmd));
                 }
             }
 
             // 用户技能
-            let mut skill_hints: Vec<&String> = state.skills.keys()
+            let mut skill_hints: Vec<&String> = state
+                .skills
+                .keys()
                 .filter(|k| k.to_lowercase().starts_with(&prefix) && **k != prefix)
                 .collect();
             skill_hints.sort();
@@ -1129,7 +1240,11 @@ fn collect_code_blocks(state: &mut AppState) {
             let trimmed = line.trim_start();
             if let Some(stripped) = trimmed.strip_prefix("```") {
                 if in_block {
-                    let l = if lang.is_empty() { "text".into() } else { lang.clone() };
+                    let l = if lang.is_empty() {
+                        "text".into()
+                    } else {
+                        lang.clone()
+                    };
                     state.code_blocks.push((l, lines.join("\n")));
                     in_block = false;
                     lines.clear();
@@ -1163,11 +1278,9 @@ fn handle_export_command(state: &mut AppState, args: &str) {
     };
     let mut md = String::new();
     md.push_str(&format!("# MiMo-OPT 会话: {}\n", state.session.name));
-    md.push_str(&format!("> 模型: {} | Token: ↓{} ↑{} | ￥{:.4}\n\n",
-        state.config.model,
-        state.total_input_tokens,
-        state.total_output_tokens,
-        state.total_cost,
+    md.push_str(&format!(
+        "> 模型: {} | Token: ↓{} ↑{} | ￥{:.4}\n\n",
+        state.config.model, state.total_input_tokens, state.total_output_tokens, state.total_cost,
     ));
     md.push_str("---\n\n");
     for msg in &state.messages {
@@ -1188,7 +1301,12 @@ fn handle_export_command(state: &mut AppState, args: &str) {
         Ok(()) => {
             state.messages.push(ChatMessage {
                 role: "assistant".to_string(),
-                content: Content::text(format!("✓ 已导出到 {} ({} 条消息, {} B)", path, state.messages.len(), md.len())),
+                content: Content::text(format!(
+                    "✓ 已导出到 {} ({} 条消息, {} B)",
+                    path,
+                    state.messages.len(),
+                    md.len()
+                )),
                 cache_control: None,
             });
         }
@@ -1441,7 +1559,10 @@ fn execute_confirm(
                         state,
                         client,
                         token_tx,
-                        format!("代码已写入 {}:\n```{}\n{}\n```\n请简要确认写入的内容。", path, lang, code),
+                        format!(
+                            "代码已写入 {}:\n```{}\n{}\n```\n请简要确认写入的内容。",
+                            path, lang, code
+                        ),
                     );
                 }
                 Err(e) => {
@@ -1475,7 +1596,10 @@ fn execute_confirm(
                         state,
                         client,
                         token_tx,
-                        format!("文件 {} 已编辑：将 \"{}\" 替换为 \"{}\"。请简要确认。", path, old, new),
+                        format!(
+                            "文件 {} 已编辑：将 \"{}\" 替换为 \"{}\"。请简要确认。",
+                            path, old, new
+                        ),
                     );
                 }
                 Err(e) => {
@@ -1496,9 +1620,10 @@ fn execute_confirm(
             if let Some(first) = state.messages.first() {
                 if first.role == "user" && !first.content.as_str().contains("[Current date:") {
                     let today = chrono_date();
-                    state.messages[0].content.as_mut_str().push_str(
-                        &format!("\n\n[Current date: {}]", today)
-                    );
+                    state.messages[0]
+                        .content
+                        .as_mut_str()
+                        .push_str(&format!("\n\n[Current date: {}]", today));
                 }
             }
             let system_text = state.system_prompt_text.clone();
@@ -1549,9 +1674,15 @@ fn show_confirm_detail(state: &mut AppState) {
                 let truncated = code.lines().count() > 15;
                 format!(
                     "将写入 {}\n语言: {}\n大小: {} B\n\n预览:\n{}\n{}",
-                    path, lang, code.len(),
+                    path,
+                    lang,
+                    code.len(),
                     preview,
-                    if truncated { "\n... (更多内容已省略)" } else { "" }
+                    if truncated {
+                        "\n... (更多内容已省略)"
+                    } else {
+                        ""
+                    }
                 )
             }
             ConfirmAction::EditFile { path, old, new, .. } => {
@@ -1626,7 +1757,11 @@ fn extract_code_from_text(text: &str) -> Option<(String, String)> {
     }
 
     last_code.map(|(lang, lines)| {
-        let l = if lang.is_empty() { "text".to_string() } else { lang };
+        let l = if lang.is_empty() {
+            "text".to_string()
+        } else {
+            lang
+        };
         (l, lines.join("\n"))
     })
 }
@@ -1642,7 +1777,11 @@ fn extract_code_blocks_from_text(text: &str) -> Vec<(String, String)> {
         let trimmed = line.trim_start();
         if let Some(stripped) = trimmed.strip_prefix("```") {
             if in_block {
-                let l = if current_lang.is_empty() { "text".to_string() } else { current_lang.clone() };
+                let l = if current_lang.is_empty() {
+                    "text".to_string()
+                } else {
+                    current_lang.clone()
+                };
                 results.push((l, current_lines.join("\n")));
                 in_block = false;
                 current_lines.clear();
@@ -1658,7 +1797,11 @@ fn extract_code_blocks_from_text(text: &str) -> Vec<(String, String)> {
 
     // 处理未闭合的代码块
     if in_block && !current_lines.is_empty() {
-        let l = if current_lang.is_empty() { "text".to_string() } else { current_lang };
+        let l = if current_lang.is_empty() {
+            "text".to_string()
+        } else {
+            current_lang
+        };
         results.push((l, current_lines.join("\n")));
     }
 
@@ -1752,8 +1895,18 @@ fn scan_project_tree() -> String {
 
     // 默认排除的目录
     let default_excludes: &[&str] = &[
-        ".git", "node_modules", "target", "__pycache__", ".venv", "venv", "vendor", ".idea",
-        ".vscode", ".DS_Store", "dist", "build",
+        ".git",
+        "node_modules",
+        "target",
+        "__pycache__",
+        ".venv",
+        "venv",
+        "vendor",
+        ".idea",
+        ".vscode",
+        ".DS_Store",
+        "dist",
+        "build",
     ];
 
     let mut entries: Vec<String> = Vec::new();

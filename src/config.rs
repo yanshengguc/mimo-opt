@@ -3,12 +3,12 @@ use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct Config {
-    pub provider: String,    // "mimo" | "deepseek" | "openai" | "custom"
+    pub provider: String, // "mimo" | "deepseek" | "openai" | "custom"
     pub api_key: String,
     pub base_url: String,
     pub model: String,
-    pub auth_type: String,   // "anthropic" | "bearer"
-    pub api_format: String,  // "anthropic" | "openai"
+    pub auth_type: String,  // "anthropic" | "bearer"
+    pub api_format: String, // "anthropic" | "openai"
     pub max_tokens: u32,
     pub skills: HashMap<String, String>,
 }
@@ -45,7 +45,7 @@ pub struct ProviderPreset {
     pub model: &'static str,
     pub auth_type: &'static str,
     pub api_format: &'static str,
-    pub input_price_per_mtok: f64,  // ¥ per million tokens
+    pub input_price_per_mtok: f64, // ¥ per million tokens
     pub output_price_per_mtok: f64,
 }
 
@@ -89,11 +89,15 @@ impl Config {
     }
 
     pub fn input_price(&self) -> f64 {
-        self.current_preset().map(|p| p.input_price_per_mtok).unwrap_or(2.0)
+        self.current_preset()
+            .map(|p| p.input_price_per_mtok)
+            .unwrap_or(2.0)
     }
 
     pub fn output_price(&self) -> f64 {
-        self.current_preset().map(|p| p.output_price_per_mtok).unwrap_or(8.0)
+        self.current_preset()
+            .map(|p| p.output_price_per_mtok)
+            .unwrap_or(8.0)
     }
 
     pub fn config_path() -> anyhow::Result<PathBuf> {
@@ -130,10 +134,18 @@ impl Config {
             Ok(Self {
                 provider: raw.provider.unwrap_or_else(|| "custom".to_string()),
                 api_key: raw.api_key.unwrap_or_default(),
-                base_url: raw.base_url.unwrap_or_else(|| default_preset.base_url.to_string()),
-                model: raw.model.unwrap_or_else(|| default_preset.model.to_string()),
-                auth_type: raw.auth_type.unwrap_or_else(|| default_preset.auth_type.to_string()),
-                api_format: raw.api_format.unwrap_or_else(|| default_preset.api_format.to_string()),
+                base_url: raw
+                    .base_url
+                    .unwrap_or_else(|| default_preset.base_url.to_string()),
+                model: raw
+                    .model
+                    .unwrap_or_else(|| default_preset.model.to_string()),
+                auth_type: raw
+                    .auth_type
+                    .unwrap_or_else(|| default_preset.auth_type.to_string()),
+                api_format: raw
+                    .api_format
+                    .unwrap_or_else(|| default_preset.api_format.to_string()),
                 max_tokens: raw.max_tokens.unwrap_or(4096),
                 skills: raw.skills.unwrap_or_default(),
             })
@@ -179,7 +191,11 @@ impl Config {
             auth_type: Some(self.auth_type.clone()),
             api_format: Some(self.api_format.clone()),
             max_tokens: Some(self.max_tokens),
-            skills: if self.skills.is_empty() { None } else { Some(self.skills.clone()) },
+            skills: if self.skills.is_empty() {
+                None
+            } else {
+                Some(self.skills.clone())
+            },
         };
         let content = serde_json::to_string_pretty(&raw)?;
         std::fs::write(&path, content)?;

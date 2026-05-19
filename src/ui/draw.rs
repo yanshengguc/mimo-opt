@@ -4,21 +4,20 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap, Widget},
+    widgets::{Block, Borders, Paragraph, Widget, Wrap},
     Frame,
 };
 use syntect::{
     easy::HighlightLines,
     highlighting::{
-        Color as SynColor, FontStyle, StyleModifier, Theme, ThemeItem,
-        ThemeSet, ScopeSelectors,
+        Color as SynColor, FontStyle, ScopeSelectors, StyleModifier, Theme, ThemeItem, ThemeSet,
     },
     parsing::SyntaxSet,
 };
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{AppState, ConfirmAction};
 use super::Theme as AppTheme;
+use crate::app::{AppState, ConfirmAction};
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -92,7 +91,10 @@ fn is_code_fence(line: &str) -> Option<Option<String>> {
     if after.is_empty() {
         return Some(None);
     }
-    if after.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.') {
+    if after
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+    {
         return Some(Some(after.to_string()));
     }
     None
@@ -110,14 +112,18 @@ fn highlight_line<'a>(
                 let fg = style.foreground;
                 spans.push(Span::styled(
                     text.to_string(),
-                    Style::default().fg(Color::Rgb(fg.r, fg.g, fg.b)).bg(AppTheme::CODE_BG),
+                    Style::default()
+                        .fg(Color::Rgb(fg.r, fg.g, fg.b))
+                        .bg(AppTheme::CODE_BG),
                 ));
             }
         }
         Err(_) => {
             spans.push(Span::styled(
                 line.to_string(),
-                Style::default().fg(AppTheme::MIMO_MSG).bg(AppTheme::CODE_BG),
+                Style::default()
+                    .fg(AppTheme::MIMO_MSG)
+                    .bg(AppTheme::CODE_BG),
             ));
         }
     }
@@ -129,11 +135,19 @@ pub fn draw(f: &mut Frame, state: &AppState) {
     if area.width < 60 || area.height < 20 {
         let warning = Line::from(Span::styled(
             " 窗口过小，请调整到 60×20 以上 ",
-            Style::default().fg(AppTheme::ERROR).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(AppTheme::ERROR)
+                .add_modifier(Modifier::BOLD),
         ));
-        let block = Block::default().borders(Borders::ALL)
+        let block = Block::default()
+            .borders(Borders::ALL)
             .border_style(Style::default().fg(AppTheme::ERROR));
-        f.render_widget(Paragraph::new(warning).block(block).alignment(ratatui::layout::Alignment::Center), area);
+        f.render_widget(
+            Paragraph::new(warning)
+                .block(block)
+                .alignment(ratatui::layout::Alignment::Center),
+            area,
+        );
         return;
     }
 
@@ -143,12 +157,12 @@ pub fn draw(f: &mut Frame, state: &AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),             // 标题栏
-            Constraint::Min(8),                // 对话区
-            Constraint::Length(hint_len),      // 技能提示
-            Constraint::Length(search_len),    // 搜索栏
-            Constraint::Length(3),             // 输入框
-            Constraint::Length(3),             // 状态栏
+            Constraint::Length(3),          // 标题栏
+            Constraint::Min(8),             // 对话区
+            Constraint::Length(hint_len),   // 技能提示
+            Constraint::Length(search_len), // 搜索栏
+            Constraint::Length(3),          // 输入框
+            Constraint::Length(3),          // 状态栏
         ])
         .split(f.area());
 
@@ -206,7 +220,12 @@ fn draw_title_bar(f: &mut Frame, area: Rect, state: &AppState) {
     let right_len = UnicodeWidthStr::width(model_text.as_str());
     let used = left_len + middle_len + right_len + 2;
 
-    let left = Span::styled(title, Style::default().fg(AppTheme::TITLE).add_modifier(Modifier::BOLD));
+    let left = Span::styled(
+        title,
+        Style::default()
+            .fg(AppTheme::TITLE)
+            .add_modifier(Modifier::BOLD),
+    );
     let middle = Span::styled(api_text, Style::default().fg(api_color));
     let right = Span::styled(model_text, Style::default().fg(AppTheme::MODEL_TAG));
 
@@ -274,44 +293,53 @@ fn draw_chat_area(f: &mut Frame, area: Rect, state: &AppState) {
                     if let Some(ref lang) = code_lang {
                         lines.push(Line::from(Span::styled(
                             format!("   ┌─ {} ──", lang),
-                            Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG),
+                            Style::default()
+                                .fg(AppTheme::CODE_BORDER)
+                                .bg(AppTheme::CODE_BG),
                         )));
                     } else {
                         lines.push(Line::from(Span::styled(
                             "   ┌──────────",
-                            Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG),
+                            Style::default()
+                                .fg(AppTheme::CODE_BORDER)
+                                .bg(AppTheme::CODE_BG),
                         )));
                     }
                 } else {
                     lines.push(Line::from(Span::styled(
                         "   └──────────",
-                        Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG),
+                        Style::default()
+                            .fg(AppTheme::CODE_BORDER)
+                            .bg(AppTheme::CODE_BG),
                     )));
                     in_code_block = false;
                     code_lang = None;
                 }
             } else if in_code_block {
                 let syntax = if let Some(ref lang) = code_lang {
-                    ps.find_syntax_by_token(lang).unwrap_or_else(|| ps.find_syntax_plain_text())
+                    ps.find_syntax_by_token(lang)
+                        .unwrap_or_else(|| ps.find_syntax_plain_text())
                 } else {
                     ps.find_syntax_plain_text()
                 };
                 let mut h = HighlightLines::new(syntax, syn_theme);
-                let mut code_spans = vec![
-                    Span::styled("  │ ", Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG)),
-                ];
+                let mut code_spans = vec![Span::styled(
+                    "  │ ",
+                    Style::default()
+                        .fg(AppTheme::CODE_BORDER)
+                        .bg(AppTheme::CODE_BG),
+                )];
                 highlight_line(&mut h, ps, line, &mut code_spans);
                 lines.push(Line::from(code_spans));
             } else {
                 let style = if is_search_match {
-                    Style::default().fg(default_color).bg(Color::Rgb(86, 95, 137))
+                    Style::default()
+                        .fg(default_color)
+                        .bg(Color::Rgb(86, 95, 137))
                 } else {
                     Style::default().fg(default_color)
                 };
-                lines.push(Line::from(Span::styled(
-                    format!("   {}", line),
-                    style,
-                )));
+                lines.push(Line::from(Span::styled(format!("   {}", line), style)));
             }
         }
 
@@ -323,7 +351,9 @@ fn draw_chat_area(f: &mut Frame, area: Rect, state: &AppState) {
     if in_code_block {
         lines.push(Line::from(Span::styled(
             "   └──────────",
-            Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG),
+            Style::default()
+                .fg(AppTheme::CODE_BORDER)
+                .bg(AppTheme::CODE_BG),
         )));
     }
 
@@ -340,27 +370,37 @@ fn draw_chat_area(f: &mut Frame, area: Rect, state: &AppState) {
                 Style::default().fg(AppTheme::SPINNER),
             )));
         } else {
-            let mut stream_code_lang = if in_code_block { code_lang.clone() } else { None };
+            let mut stream_code_lang = if in_code_block {
+                code_lang.clone()
+            } else {
+                None
+            };
 
             for line in state.stream_buffer.lines() {
                 if stream_code_lang.is_some() {
                     if is_code_fence(line).is_some() {
                         lines.push(Line::from(Span::styled(
                             "   └──────────",
-                            Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG),
+                            Style::default()
+                                .fg(AppTheme::CODE_BORDER)
+                                .bg(AppTheme::CODE_BG),
                         )));
                         stream_code_lang = None;
                         continue;
                     }
                     let syntax = if let Some(ref lang) = stream_code_lang {
-                        ps.find_syntax_by_token(lang).unwrap_or_else(|| ps.find_syntax_plain_text())
+                        ps.find_syntax_by_token(lang)
+                            .unwrap_or_else(|| ps.find_syntax_plain_text())
                     } else {
                         ps.find_syntax_plain_text()
                     };
                     let mut h = HighlightLines::new(syntax, syn_theme);
-                    let mut code_spans = vec![
-                        Span::styled("  │ ", Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG)),
-                    ];
+                    let mut code_spans = vec![Span::styled(
+                        "  │ ",
+                        Style::default()
+                            .fg(AppTheme::CODE_BORDER)
+                            .bg(AppTheme::CODE_BG),
+                    )];
                     highlight_line(&mut h, ps, line, &mut code_spans);
                     lines.push(Line::from(code_spans));
                 } else if let Some(lang_opt) = is_code_fence(line) {
@@ -368,12 +408,16 @@ fn draw_chat_area(f: &mut Frame, area: Rect, state: &AppState) {
                     if let Some(ref lang) = lang_opt {
                         lines.push(Line::from(Span::styled(
                             format!("   ┌─ {} ──", lang),
-                            Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG),
+                            Style::default()
+                                .fg(AppTheme::CODE_BORDER)
+                                .bg(AppTheme::CODE_BG),
                         )));
                     } else {
                         lines.push(Line::from(Span::styled(
                             "   ┌──────────",
-                            Style::default().fg(AppTheme::CODE_BORDER).bg(AppTheme::CODE_BG),
+                            Style::default()
+                                .fg(AppTheme::CODE_BORDER)
+                                .bg(AppTheme::CODE_BG),
                         )));
                     }
                 } else {
@@ -386,7 +430,9 @@ fn draw_chat_area(f: &mut Frame, area: Rect, state: &AppState) {
             if stream_code_lang.is_some() {
                 lines.push(Line::from(Span::styled(
                     "  │ ▎",
-                    Style::default().fg(AppTheme::MODEL_TAG).bg(AppTheme::CODE_BG),
+                    Style::default()
+                        .fg(AppTheme::MODEL_TAG)
+                        .bg(AppTheme::CODE_BG),
                 )));
             } else {
                 lines.push(Line::from(Span::styled(
@@ -426,7 +472,11 @@ fn draw_search_bar(f: &mut Frame, area: Rect, state: &AppState) {
     let match_info = if state.search_matches.is_empty() {
         "no matches".to_string()
     } else {
-        format!("{}/{}", state.search_match_idx + 1, state.search_matches.len())
+        format!(
+            "{}/{}",
+            state.search_match_idx + 1,
+            state.search_matches.len()
+        )
     };
     let text = format!("  / {}  {}", state.search_query, match_info);
     let p = Paragraph::new(Span::styled(text, Style::default().fg(AppTheme::TITLE)));
@@ -467,10 +517,15 @@ fn draw_input_area(f: &mut Frame, area: Rect, state: &AppState) {
         let before = &state.input[..state.cursor_pos];
         let after = &state.input[state.cursor_pos..];
 
-        spans.push(Span::styled(before, Style::default().fg(AppTheme::USER_MSG)));
+        spans.push(Span::styled(
+            before,
+            Style::default().fg(AppTheme::USER_MSG),
+        ));
         spans.push(Span::styled(
             "▎",
-            Style::default().fg(AppTheme::INPUT_PROMPT).add_modifier(Modifier::SLOW_BLINK),
+            Style::default()
+                .fg(AppTheme::INPUT_PROMPT)
+                .add_modifier(Modifier::SLOW_BLINK),
         ));
         if !after.is_empty() {
             spans.push(Span::styled(after, Style::default().fg(AppTheme::USER_MSG)));
@@ -478,19 +533,29 @@ fn draw_input_area(f: &mut Frame, area: Rect, state: &AppState) {
     }
 
     // 右侧快捷键提示
-    let hint = if state.search_active { "Enter ↵  Esc ✕" }
-        else if state.generating { "Esc" }
-        else { "Ctrl+Enter ↵" };
+    let hint = if state.search_active {
+        "Enter ↵  Esc ✕"
+    } else if state.generating {
+        "Esc"
+    } else {
+        "Ctrl+Enter ↵"
+    };
     let hint_len = UnicodeWidthStr::width(hint);
     let total_width = area.width as usize;
-    let content_len: usize = spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum();
+    let content_len: usize = spans
+        .iter()
+        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+        .sum();
     let padding = if total_width > content_len + hint_len + 4 {
         total_width - content_len - hint_len - 4
     } else {
         1
     };
     spans.push(Span::raw(" ".repeat(padding)));
-    spans.push(Span::styled(hint, Style::default().fg(AppTheme::STATUS_LABEL)));
+    spans.push(Span::styled(
+        hint,
+        Style::default().fg(AppTheme::STATUS_LABEL),
+    ));
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -504,7 +569,10 @@ fn draw_input_area(f: &mut Frame, area: Rect, state: &AppState) {
 fn draw_status_bar(f: &mut Frame, area: Rect, state: &AppState) {
     let total_tok = state.total_input_tokens + state.total_output_tokens;
     let token_text = format!(" ◉ {:.1}K tok ", total_tok as f64 / 1000.0);
-    let io_text = format!(" ↓{} ↑{} ", state.total_input_tokens, state.total_output_tokens);
+    let io_text = format!(
+        " ↓{} ↑{} ",
+        state.total_input_tokens, state.total_output_tokens
+    );
     let cost_text = format!(" ￥{:.4} ", state.total_cost);
 
     // 消息计数
@@ -554,7 +622,10 @@ fn draw_status_bar(f: &mut Frame, area: Rect, state: &AppState) {
     if let Some(ref err) = state.error_message {
         let err_text = format!(" ✗ {} ", err);
         let total_width = area.width as usize;
-        let content_len: usize = spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum();
+        let content_len: usize = spans
+            .iter()
+            .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+            .sum();
         let padding = if total_width > content_len + UnicodeWidthStr::width(err_text.as_str()) + 2 {
             total_width - content_len - UnicodeWidthStr::width(err_text.as_str()) - 2
         } else {
@@ -598,7 +669,9 @@ fn draw_confirm_modal(f: &mut Frame, confirm: &crate::app::ConfirmState) {
     };
     lines.push(Line::from(Span::styled(
         title,
-        Style::default().fg(AppTheme::ERROR).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(AppTheme::ERROR)
+            .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::raw(""));
 
@@ -614,11 +687,26 @@ fn draw_confirm_modal(f: &mut Frame, confirm: &crate::app::ConfirmState) {
 
     // 操作提示
     lines.push(Line::from(vec![
-        Span::styled(" y", Style::default().fg(AppTheme::SUCCESS).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " y",
+            Style::default()
+                .fg(AppTheme::SUCCESS)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" 确认  ", Style::default().fg(AppTheme::USER_MSG)),
-        Span::styled("n", Style::default().fg(AppTheme::ERROR).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "n",
+            Style::default()
+                .fg(AppTheme::ERROR)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" 取消  ", Style::default().fg(AppTheme::USER_MSG)),
-        Span::styled("d", Style::default().fg(AppTheme::MODEL_TAG).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "d",
+            Style::default()
+                .fg(AppTheme::MODEL_TAG)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" 详情", Style::default().fg(AppTheme::USER_MSG)),
     ]));
 

@@ -1,6 +1,6 @@
+mod api;
 mod app;
 mod config;
-mod api;
 mod file_ops;
 mod session;
 mod ui;

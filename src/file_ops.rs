@@ -49,8 +49,7 @@ pub fn validate_path(path_str: &str, cwd: &Path) -> Result<PathBuf, String> {
 
 /// 读取文件，可选指定行范围 (start, end)，均为 1-indexed
 pub fn read_file(path: &Path, line_range: Option<(usize, usize)>) -> Result<String, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("读取失败: {}", e))?;
+    let content = std::fs::read_to_string(path).map_err(|e| format!("读取失败: {}", e))?;
 
     match line_range {
         Some((start, end)) => {
@@ -85,11 +84,9 @@ pub fn write_file(path: &Path, content: &str) -> Result<String, String> {
         backup_file(path)?;
     }
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("创建目录失败: {}", e))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
     }
-    std::fs::write(path, content)
-        .map_err(|e| format!("写入失败: {}", e))?;
+    std::fs::write(path, content).map_err(|e| format!("写入失败: {}", e))?;
     Ok(format!("已写入 {} ({} B)", path.display(), content.len()))
 }
 
@@ -97,19 +94,13 @@ pub fn write_file(path: &Path, content: &str) -> Result<String, String> {
 fn backup_file(path: &Path) -> Result<(), String> {
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let backup_dir = cwd.join(".mimo-opt").join("backups");
-    std::fs::create_dir_all(&backup_dir)
-        .map_err(|e| format!("创建备份目录失败: {}", e))?;
+    std::fs::create_dir_all(&backup_dir).map_err(|e| format!("创建备份目录失败: {}", e))?;
 
-    let file_name = path
-        .file_name()
-        .ok_or("无效文件名")?
-        .to_string_lossy();
+    let file_name = path.file_name().ok_or("无效文件名")?.to_string_lossy();
     let ts = now_secs();
-    let backup_path = backup_dir
-        .join(format!("{}.{}.bak", file_name, ts));
+    let backup_path = backup_dir.join(format!("{}.{}.bak", file_name, ts));
 
-    std::fs::copy(path, &backup_path)
-        .map_err(|e| format!("备份失败: {}", e))?;
+    std::fs::copy(path, &backup_path).map_err(|e| format!("备份失败: {}", e))?;
 
     // 清理旧备份，保留最近 5 个
     let prefix = format!("{}.", file_name);
@@ -139,8 +130,7 @@ pub fn apply_edit(path: &Path, old: &str, new: &str) -> Result<String, String> {
         return Err("查找文本不能为空".into());
     }
 
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("读取失败: {}", e))?;
+    let content = std::fs::read_to_string(path).map_err(|e| format!("读取失败: {}", e))?;
 
     if !content.contains(old) {
         return Err("未找到匹配文本".into());
@@ -151,8 +141,7 @@ pub fn apply_edit(path: &Path, old: &str, new: &str) -> Result<String, String> {
 
     backup_file(path)?;
 
-    std::fs::write(path, &new_content)
-        .map_err(|e| format!("写入失败: {}", e))?;
+    std::fs::write(path, &new_content).map_err(|e| format!("写入失败: {}", e))?;
 
     Ok(format!(
         "已编辑 {} ({} 处替换 → {} B)",

@@ -276,12 +276,14 @@ impl MiMoClient {
                                     }
                                 }
                                 "message_stop" => {
-                                    let _ = tx.send(StreamResult::Done {
-                                        input_tokens,
-                                        output_tokens,
-                                        cache_creation_tokens,
-                                        cache_read_tokens,
-                                    }).await;
+                                    let _ = tx
+                                        .send(StreamResult::Done {
+                                            input_tokens,
+                                            output_tokens,
+                                            cache_creation_tokens,
+                                            cache_read_tokens,
+                                        })
+                                        .await;
                                     return Ok(());
                                 }
                                 _ => {}
@@ -295,12 +297,14 @@ impl MiMoClient {
             partial = remaining;
         }
 
-        let _ = tx.send(StreamResult::Done {
-            input_tokens,
-            output_tokens,
-            cache_creation_tokens,
-            cache_read_tokens,
-        }).await;
+        let _ = tx
+            .send(StreamResult::Done {
+                input_tokens,
+                output_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
+            })
+            .await;
         Ok(())
     }
 
@@ -312,7 +316,8 @@ impl MiMoClient {
         messages: &[ChatMessage],
         s: &ClientSettings,
     ) -> reqwest::RequestBuilder {
-        let mut openai_msgs: Vec<OpenAIMessage> = Vec::with_capacity(messages.len() + system.len() + 1);
+        let mut openai_msgs: Vec<OpenAIMessage> =
+            Vec::with_capacity(messages.len() + system.len() + 1);
 
         for sc in system {
             openai_msgs.push(OpenAIMessage {
@@ -323,10 +328,13 @@ impl MiMoClient {
 
         for msg in messages {
             if msg.role == "system" {
-                openai_msgs.insert(0, OpenAIMessage {
-                    role: "system".to_string(),
-                    content: msg.content.as_str().to_string(),
-                });
+                openai_msgs.insert(
+                    0,
+                    OpenAIMessage {
+                        role: "system".to_string(),
+                        content: msg.content.as_str().to_string(),
+                    },
+                );
             } else {
                 openai_msgs.push(OpenAIMessage {
                     role: msg.role.clone(),
@@ -340,7 +348,9 @@ impl MiMoClient {
             messages: openai_msgs,
             max_tokens: s.max_tokens,
             stream: true,
-            stream_options: Some(OpenAIStreamOptions { include_usage: true }),
+            stream_options: Some(OpenAIStreamOptions {
+                include_usage: true,
+            }),
         };
         self.client.post(&s.messages_url).json(&req)
     }
@@ -386,12 +396,14 @@ impl MiMoClient {
                     let line = line.trim();
                     if let Some(data) = line.strip_prefix("data: ") {
                         if data == "[DONE]" {
-                            let _ = tx.send(StreamResult::Done {
-                                input_tokens,
-                                output_tokens,
-                                cache_creation_tokens: 0,
-                                cache_read_tokens: 0,
-                            }).await;
+                            let _ = tx
+                                .send(StreamResult::Done {
+                                    input_tokens,
+                                    output_tokens,
+                                    cache_creation_tokens: 0,
+                                    cache_read_tokens: 0,
+                                })
+                                .await;
                             return Ok(());
                         }
                         if let Ok(event) = serde_json::from_str::<OpenAIStreamEvent>(data) {
@@ -419,12 +431,14 @@ impl MiMoClient {
         }
 
         // 流意外结束
-        let _ = tx.send(StreamResult::Done {
-            input_tokens,
-            output_tokens,
-            cache_creation_tokens: 0,
-            cache_read_tokens: 0,
-        }).await;
+        let _ = tx
+            .send(StreamResult::Done {
+                input_tokens,
+                output_tokens,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+            })
+            .await;
         Ok(())
     }
 }
@@ -445,7 +459,11 @@ fn find_sse_separator(text: &str) -> Option<(usize, usize)> {
     let rnrn = text.find("\r\n\r\n");
     match (nn, rnrn) {
         (Some(n), Some(r)) => {
-            if n < r { Some((n, 2)) } else { Some((r, 4)) }
+            if n < r {
+                Some((n, 2))
+            } else {
+                Some((r, 4))
+            }
         }
         (Some(n), None) => Some((n, 2)),
         (None, Some(r)) => Some((r, 4)),
