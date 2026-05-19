@@ -122,7 +122,18 @@ MiMo-OPT 首次运行，请配置 API Key
 | `base_url` | `https://token-plan-sgp.xiaomimimo.com/anthropic` | API 端点 |
 | `model` | `mimo-v2-flash` | 模型名称 |
 | `auth_type` | `anthropic` | 认证方式：`anthropic`（api-key header）或 `bearer`（Authorization: Bearer） |
+| `api_format` | `anthropic` | 数据格式：`anthropic`（Anthropic Messages）或 `openai`（OpenAI 兼容） |
+| `max_tokens` | `4096` | 最大输出 token 数 |
 | `skills` | `{}` | 技能命令映射，如 `{"lint": "cargo clippy 2>&1"}` |
+
+`auth_type` 和 `api_format` 正交组合，适配不同 API 提供商：
+
+| API | auth_type | api_format | base_url |
+|-----|-----------|------------|----------|
+| MiMo Token Plan | `anthropic` | `anthropic` | `https://token-plan-sgp.xiaomimimo.com/anthropic` |
+| MiMo API | `bearer` | `openai` | `https://api.xiaomimimo.com/v1` |
+| DeepSeek | `bearer` | `openai` | `https://api.deepseek.com` |
+| GLM (智谱) | `bearer` | `openai` | `https://open.bigmodel.cn/api/paas/v4` |
 
 ## 快捷键
 
