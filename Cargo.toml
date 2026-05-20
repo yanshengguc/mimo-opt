@@ -1,6 +1,6 @@
 [package]
 name = "mimo-opt"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2021"
 description = "MiMo-OPT: 小米 MiMo API 终端聊天工具"
 

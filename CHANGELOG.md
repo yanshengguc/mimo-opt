@@ -1,5 +1,34 @@
 # MiMo-OPT 更新日志
 
+## v0.3.6 (2026-05-20) — 代码去重 + 架构优化
+
+**目标**: 消除重复代码，提取公共模式，提升可维护性。零功能变更，零行为变更。
+
+### 重构
+
+- **R1 SSE 流式解析提取**: `stream_anthropic()` 和 `stream_openai()` 共享的 UTF-8 安全解码 + SSE 事件分割逻辑提取为 `process_sse_stream()` 泛型函数 + `SseAction` enum。两套流解析器各减少 ~40 行重复代码
+- **R2 代码块提取统一**: `collect_code_blocks()` 从内联解析改为调用 `extract_code_blocks_from_text()`，消除第 4 套代码块解析实现。`extract_last_code_block()` 同步简化
+- **R3 日期注入 + 异步调度提取**: 3 处重复的"首条消息注入日期 + clone 消息 + 缓存断点 + spawn"模式提取为 `inject_date_if_needed()` + `spawn_stream_request()` 两个函数。正常发送 / 确认发送 / `send_to_mimo` 三路径统一
+- **R4 内置命令常量**: `BUILTIN_COMMANDS` 常量替代 `update_hint_lines()` 中的硬编码列表，消除与 `/help` 文本的不一致风险
+
+### 修改文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `src/api/mod.rs` | R1: `process_sse_stream()` + `SseAction` enum，两套流解析器精简 |
+| `src/app.rs` | R2/R3/R4: 代码块统一、日期注入提取、命令常量、`send_to_mimo` 精简为 1 行 |
+| `Cargo.toml` | 版本号 0.3.5 → 0.3.6 |
+
+### 回滚指南
+
+如需回滚到 v0.3.5：
+```bash
+git log --oneline  # 找到 v0.3.5 checkpoint commit
+git revert HEAD    # 或 git reset --hard <checkpoint_hash>
+```
+
+---
+
 ## v0.3.5 (2026-05-19) — UX 优化六连
 
 ### 新功能

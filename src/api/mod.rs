@@ -205,97 +205,48 @@ impl MiMoClient {
         response: reqwest::Response,
         tx: mpsc::Sender<StreamResult>,
     ) -> anyhow::Result<()> {
-        let mut stream = response.bytes_stream();
-        let mut raw_buffer: Vec<u8> = Vec::new();
-        let mut partial: String = String::new();
         let mut input_tokens = 0u64;
         let mut output_tokens = 0u64;
         let mut cache_creation_tokens = 0u64;
         let mut cache_read_tokens = 0u64;
 
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            raw_buffer.extend_from_slice(&chunk);
-
-            let (decoded, valid_up_to) = match std::str::from_utf8(&raw_buffer) {
-                Ok(s) => (s.to_string(), raw_buffer.len()),
-                Err(e) => {
-                    let valid_up_to = e.valid_up_to();
-                    if valid_up_to == 0 {
-                        continue;
-                    }
-                    let valid_part = String::from_utf8_lossy(&raw_buffer[..valid_up_to]);
-                    (valid_part.to_string(), valid_up_to)
-                }
-            };
-
-            raw_buffer = raw_buffer[valid_up_to..].to_vec();
-
-            let mut remaining = partial.clone();
-            remaining.push_str(&decoded);
-            partial.clear();
-
-            while let Some((pos, sep_len)) = find_sse_separator(&remaining) {
-                let event_str = remaining[..pos].to_string();
-                remaining = remaining[pos + sep_len..].to_string();
-
-                for line in event_str.lines() {
-                    let line = line.trim();
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if data == "[DONE]" {
-                            continue;
-                        }
-                        if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(data) {
-                            match event.event_type.as_str() {
-                                "content_block_delta" => {
-                                    if let Some(delta) = event.delta {
-                                        if delta.delta_type == "text_delta" {
-                                            if let Some(text) = delta.text {
-                                                output_tokens += 1;
-                                                let _ = tx.send(StreamResult::Token(text)).await;
-                                            }
-                                        }
-                                    }
-                                }
-                                "message_start" => {
-                                    if let Some(msg) = event.message {
-                                        if let Some(usage) = msg.usage {
-                                            input_tokens = usage.input_tokens.unwrap_or(0);
-                                            cache_creation_tokens =
-                                                usage.cache_creation_input_tokens.unwrap_or(0);
-                                            cache_read_tokens =
-                                                usage.cache_read_input_tokens.unwrap_or(0);
-                                        }
-                                    }
-                                }
-                                "message_delta" => {
-                                    if let Some(msg) = event.message {
-                                        if let Some(usage) = msg.usage {
-                                            output_tokens = usage.output_tokens.unwrap_or(0);
-                                        }
-                                    }
-                                }
-                                "message_stop" => {
-                                    let _ = tx
-                                        .send(StreamResult::Done {
-                                            input_tokens,
-                                            output_tokens,
-                                            cache_creation_tokens,
-                                            cache_read_tokens,
-                                        })
-                                        .await;
-                                    return Ok(());
-                                }
-                                _ => {}
+        process_sse_stream(response, &tx, |data| {
+            let event: AnthropicStreamEvent = serde_json::from_str(data)?;
+            match event.event_type.as_str() {
+                "content_block_delta" => {
+                    if let Some(delta) = event.delta {
+                        if delta.delta_type == "text_delta" {
+                            if let Some(text) = delta.text {
+                                output_tokens += 1;
+                                return Ok(SseAction::Token(text));
                             }
                         }
                     }
+                    Ok(SseAction::Continue)
                 }
+                "message_start" => {
+                    if let Some(msg) = event.message {
+                        if let Some(usage) = msg.usage {
+                            input_tokens = usage.input_tokens.unwrap_or(0);
+                            cache_creation_tokens = usage.cache_creation_input_tokens.unwrap_or(0);
+                            cache_read_tokens = usage.cache_read_input_tokens.unwrap_or(0);
+                        }
+                    }
+                    Ok(SseAction::Continue)
+                }
+                "message_delta" => {
+                    if let Some(msg) = event.message {
+                        if let Some(usage) = msg.usage {
+                            output_tokens = usage.output_tokens.unwrap_or(0);
+                        }
+                    }
+                    Ok(SseAction::Continue)
+                }
+                "message_stop" => Ok(SseAction::Done),
+                _ => Ok(SseAction::Continue),
             }
-
-            // Save incomplete trailing data for next chunk
-            partial = remaining;
-        }
+        })
+        .await;
 
         let _ = tx
             .send(StreamResult::Done {
@@ -360,77 +311,33 @@ impl MiMoClient {
         response: reqwest::Response,
         tx: mpsc::Sender<StreamResult>,
     ) -> anyhow::Result<()> {
-        let mut stream = response.bytes_stream();
-        let mut raw_buffer: Vec<u8> = Vec::new();
-        let mut partial: String = String::new();
         let mut input_tokens: u64 = 0;
         let mut output_tokens: u64 = 0;
 
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            raw_buffer.extend_from_slice(&chunk);
-
-            let (decoded, valid_up_to) = match std::str::from_utf8(&raw_buffer) {
-                Ok(s) => (s.to_string(), raw_buffer.len()),
-                Err(e) => {
-                    let valid_up_to = e.valid_up_to();
-                    if valid_up_to == 0 {
-                        continue;
-                    }
-                    let valid_part = String::from_utf8_lossy(&raw_buffer[..valid_up_to]);
-                    (valid_part.to_string(), valid_up_to)
-                }
-            };
-
-            raw_buffer = raw_buffer[valid_up_to..].to_vec();
-
-            let mut remaining = partial.clone();
-            remaining.push_str(&decoded);
-            partial.clear();
-
-            while let Some((pos, sep_len)) = find_sse_separator(&remaining) {
-                let event_str = remaining[..pos].to_string();
-                remaining = remaining[pos + sep_len..].to_string();
-
-                for line in event_str.lines() {
-                    let line = line.trim();
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if data == "[DONE]" {
-                            let _ = tx
-                                .send(StreamResult::Done {
-                                    input_tokens,
-                                    output_tokens,
-                                    cache_creation_tokens: 0,
-                                    cache_read_tokens: 0,
-                                })
-                                .await;
-                            return Ok(());
-                        }
-                        if let Ok(event) = serde_json::from_str::<OpenAIStreamEvent>(data) {
-                            if let Some(usage) = event.usage {
-                                input_tokens = usage.input_tokens.unwrap_or(0);
-                                output_tokens = usage.output_tokens.unwrap_or(0);
-                            }
-                            if let Some(choices) = event.choices {
-                                for choice in choices {
-                                    if let Some(delta) = choice.delta {
-                                        if let Some(text) = delta.content {
-                                            if !text.is_empty() {
-                                                let _ = tx.send(StreamResult::Token(text)).await;
-                                            }
-                                        }
-                                    }
-                                }
+        process_sse_stream(response, &tx, |data| {
+            if data == "[DONE]" {
+                return Ok(SseAction::Done);
+            }
+            let event: OpenAIStreamEvent = serde_json::from_str(data)?;
+            if let Some(usage) = event.usage {
+                input_tokens = usage.input_tokens.unwrap_or(0);
+                output_tokens = usage.output_tokens.unwrap_or(0);
+            }
+            if let Some(choices) = event.choices {
+                for choice in choices {
+                    if let Some(delta) = choice.delta {
+                        if let Some(text) = delta.content {
+                            if !text.is_empty() {
+                                return Ok(SseAction::Token(text));
                             }
                         }
                     }
                 }
             }
+            Ok(SseAction::Continue)
+        })
+        .await;
 
-            partial = remaining;
-        }
-
-        // 流意外结束
         let _ = tx
             .send(StreamResult::Done {
                 input_tokens,
@@ -440,6 +347,74 @@ impl MiMoClient {
             })
             .await;
         Ok(())
+    }
+}
+
+// ── SSE 流式解析（共用） ──
+
+enum SseAction {
+    Token(String),
+    Done,
+    Continue,
+}
+
+/// 通用 SSE 流处理器：UTF-8 安全解码 + 事件分割 + 调用 handler 处理每个 data 行
+async fn process_sse_stream<F>(
+    response: reqwest::Response,
+    tx: &mpsc::Sender<StreamResult>,
+    mut handler: F,
+) where
+    F: FnMut(&str) -> anyhow::Result<SseAction>,
+{
+    let mut stream = response.bytes_stream();
+    let mut raw_buffer: Vec<u8> = Vec::new();
+    let mut partial: String = String::new();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(_) => break,
+        };
+        raw_buffer.extend_from_slice(&chunk);
+
+        let (decoded, valid_up_to) = match std::str::from_utf8(&raw_buffer) {
+            Ok(s) => (s.to_string(), raw_buffer.len()),
+            Err(e) => {
+                let valid_up_to = e.valid_up_to();
+                if valid_up_to == 0 {
+                    continue;
+                }
+                let valid_part = String::from_utf8_lossy(&raw_buffer[..valid_up_to]);
+                (valid_part.to_string(), valid_up_to)
+            }
+        };
+
+        raw_buffer = raw_buffer[valid_up_to..].to_vec();
+
+        let mut remaining = partial.clone();
+        remaining.push_str(&decoded);
+        partial.clear();
+
+        while let Some((pos, sep_len)) = find_sse_separator(&remaining) {
+            let event_str = remaining[..pos].to_string();
+            remaining = remaining[pos + sep_len..].to_string();
+
+            for line in event_str.lines() {
+                let line = line.trim();
+                if let Some(data) = line.strip_prefix("data: ") {
+                    match handler(data) {
+                        Ok(SseAction::Token(text)) => {
+                            let _ = tx.send(StreamResult::Token(text)).await;
+                        }
+                        Ok(SseAction::Done) => return,
+                        Ok(SseAction::Continue) => {}
+                        Err(_) => {}
+                    }
+                }
+            }
+        }
+
+        partial = remaining;
     }
 }
 

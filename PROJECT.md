@@ -85,7 +85,6 @@
 | 功能 | 优先级 | 说明 |
 |------|--------|------|
 | 桌面端（Tauri） | P2-8 | 已决定终端版先交付 |
-| 导出会话为 Markdown | P3 | |
 | MCP 支持 | P3 | |
 | HTTP API 模式 | P3 | |
 
@@ -93,7 +92,7 @@
 
 ## 项目快照
 
-- **当前行数**：~3661 行 Rust（11 个源文件）
+- **当前行数**：~3786 行 Rust（11 个源文件）
 - **依赖**：tokio, reqwest, serde, serde_json, ratatui, crossterm, futures-util, dirs, anyhow, scopeguard, unicode-width, syntect, cli-clipboard
 - **编译状态**：通过，0 warnings
 - **API 端点**：MiMo Token Plan / DeepSeek / OpenAI / 自定义（多 Provider 预设）

@@ -19,6 +19,10 @@ use crate::util::{get_cwd, now_secs};
 
 const MAX_MESSAGES: usize = 200;
 const MESSAGE_WARN_THRESHOLD: usize = 160; // 80% of MAX
+const BUILTIN_COMMANDS: &[&str] = &[
+    "read", "write", "edit", "clear", "export", "model", "provider", "skills", "addskill",
+    "rmskill", "errors", "help",
+];
 
 #[derive(Clone)]
 pub enum ConfirmAction {
@@ -843,45 +847,7 @@ async fn run_loop(
                                 ));
                             }
 
-                            state.generating = true;
-                            state.stream_buffer.clear();
-                            state.spinner_tick = 0;
-
-                            // 首条 user 消息注入日期
-                            if let Some(first) = state.messages.first() {
-                                if first.role == "user"
-                                    && !first.content.as_str().contains("[Current date:")
-                                {
-                                    let today = chrono_date();
-                                    state.messages[0]
-                                        .content
-                                        .as_mut_str()
-                                        .push_str(&format!("\n\n[Current date: {}]", today));
-                                }
-                            }
-
-                            let system_text = state.system_prompt_text.clone();
-
-                            let mut messages = state.messages.clone();
-                            apply_cache_breakpoints(&mut messages);
-
-                            let system_content = build_system_content(&system_text);
-
-                            let client = Arc::clone(client);
-                            let tx = token_tx.clone();
-                            let (cancel_tx, cancel_rx) = oneshot::channel();
-                            state.cancel_tx = Some(cancel_tx);
-
-                            tokio::spawn(async move {
-                                tokio::select! {
-                                    result = client.send_message_stream(&system_content, &messages, tx.clone()) => {
-                                        if let Err(e) = result {
-                                            let _ = tx.send(StreamResult::Error(e.to_string())).await;
-                                        }
-                                    }
-                                    _ = cancel_rx => {}
-                                }
-                            });
+                            spawn_stream_request(state, client, token_tx, None);
                         }
                     }
                     // 输入字符（非搜索模式、非确认状态）
@@ -1154,6 +1120,68 @@ fn build_system_content(system_text: &str) -> Vec<SystemContent> {
     }]
 }
 
+/// 首条 user 消息注入日期（跨天缓存失效保护）
+fn inject_date_if_needed(messages: &mut [ChatMessage]) {
+    if let Some(first) = messages.first_mut() {
+        if first.role == "user" && !first.content.as_str().contains("[Current date:") {
+            let today = chrono_date();
+            first
+                .content
+                .as_mut_str()
+                .push_str(&format!("\n\n[Current date: {}]", today));
+        }
+    }
+}
+
+/// 启动流式请求：克隆消息、注入日期、设置缓存断点、spawn 异步任务
+fn spawn_stream_request(
+    state: &mut AppState,
+    client: &Arc<MiMoClient>,
+    token_tx: &mpsc::Sender<StreamResult>,
+    extra_user_msg: Option<String>,
+) {
+    state.generating = true;
+    state.stream_buffer.clear();
+    state.spinner_tick = 0;
+
+    let mut msgs = state.messages.clone();
+    if let Some(msg_text) = extra_user_msg {
+        msgs.push(ChatMessage {
+            role: "user".to_string(),
+            content: Content::text(msg_text),
+            cache_control: None,
+        });
+    }
+    // 消息数上限保护
+    if msgs.len() > MAX_MESSAGES {
+        let excess = msgs.len() - 150;
+        if excess > 0 {
+            msgs.drain(0..excess);
+        }
+    }
+
+    inject_date_if_needed(&mut msgs);
+    apply_cache_breakpoints(&mut msgs);
+
+    let system_text = state.system_prompt_text.clone();
+    let system_content = build_system_content(&system_text);
+    let client = Arc::clone(client);
+    let tx = token_tx.clone();
+    let (cancel_tx, cancel_rx) = oneshot::channel();
+    state.cancel_tx = Some(cancel_tx);
+
+    tokio::spawn(async move {
+        tokio::select! {
+            result = client.send_message_stream(&system_content, &msgs, tx.clone()) => {
+                if let Err(e) = result {
+                    let _ = tx.send(StreamResult::Error(e.to_string())).await;
+                }
+            }
+            _ = cancel_rx => {}
+        }
+    });
+}
+
 fn apply_cache_breakpoints(messages: &mut [ChatMessage]) {
     let n = messages.len();
     if n == 0 {
@@ -1180,10 +1208,7 @@ fn update_hint_lines(state: &mut AppState) {
             let mut hints: Vec<String> = Vec::new();
 
             // 内置命令
-            for cmd in &[
-                "read", "write", "edit", "clear", "model", "provider", "skills", "addskill",
-                "rmskill", "help",
-            ] {
+            for cmd in BUILTIN_COMMANDS {
                 if cmd.starts_with(&prefix) && *cmd != prefix {
                     hints.push(format!("/{}", cmd));
                 }
@@ -1224,43 +1249,18 @@ fn do_search(state: &mut AppState) {
 fn collect_code_blocks(state: &mut AppState) {
     state.code_blocks.clear();
 
-    // 也扫描 stream_buffer 中的代码块（生成中的代码 Ctrl+Y 可复制）
+    // 扫描 stream_buffer 中的代码块（生成中的代码 Ctrl+Y 可复制）
     if !state.stream_buffer.is_empty() {
-        for (lang, content) in extract_code_blocks_from_text(&state.stream_buffer) {
-            state.code_blocks.push((lang, content));
-        }
+        state
+            .code_blocks
+            .extend(extract_code_blocks_from_text(&state.stream_buffer));
     }
 
+    // 扫描所有消息中的代码块
     for msg in &state.messages {
-        let text = msg.content.as_str();
-        let mut in_block = false;
-        let mut lang = String::new();
-        let mut lines: Vec<String> = Vec::new();
-        for line in text.lines() {
-            let trimmed = line.trim_start();
-            if let Some(stripped) = trimmed.strip_prefix("```") {
-                if in_block {
-                    let l = if lang.is_empty() {
-                        "text".into()
-                    } else {
-                        lang.clone()
-                    };
-                    state.code_blocks.push((l, lines.join("\n")));
-                    in_block = false;
-                    lines.clear();
-                } else {
-                    in_block = true;
-                    lang = stripped.to_string();
-                    lines.clear();
-                }
-            } else if in_block {
-                lines.push(line.to_string());
-            }
-        }
-        if in_block && !lines.is_empty() {
-            let l = if lang.is_empty() { "text".into() } else { lang };
-            state.code_blocks.push((l, lines.join("\n")));
-        }
+        state
+            .code_blocks
+            .extend(extract_code_blocks_from_text(msg.content.as_str()));
     }
 }
 
@@ -1614,36 +1614,7 @@ fn execute_confirm(
                 cache_control: None,
             });
             maybe_truncate_messages(state);
-            state.generating = true;
-            state.stream_buffer.clear();
-            state.spinner_tick = 0;
-            if let Some(first) = state.messages.first() {
-                if first.role == "user" && !first.content.as_str().contains("[Current date:") {
-                    let today = chrono_date();
-                    state.messages[0]
-                        .content
-                        .as_mut_str()
-                        .push_str(&format!("\n\n[Current date: {}]", today));
-                }
-            }
-            let system_text = state.system_prompt_text.clone();
-            let mut messages = state.messages.clone();
-            apply_cache_breakpoints(&mut messages);
-            let system_content = build_system_content(&system_text);
-            let client = Arc::clone(client);
-            let tx = token_tx.clone();
-            let (cancel_tx, cancel_rx) = oneshot::channel();
-            state.cancel_tx = Some(cancel_tx);
-            tokio::spawn(async move {
-                tokio::select! {
-                    result = client.send_message_stream(&system_content, &messages, tx.clone()) => {
-                        if let Err(e) = result {
-                            let _ = tx.send(StreamResult::Error(e.to_string())).await;
-                        }
-                    }
-                    _ = cancel_rx => {}
-                }
-            });
+            spawn_stream_request(state, client, token_tx, None);
         }
         ConfirmAction::ClearChat => {
             let count = state.messages.len();
@@ -1714,56 +1685,18 @@ fn extract_last_code_block<'a>(
 ) -> Option<(String, String)> {
     // 先从 stream_buffer 找（如果有生成中的内容）
     if !stream_buffer.is_empty() {
-        if let Some(result) = extract_code_from_text(stream_buffer) {
+        if let Some(result) = extract_code_blocks_from_text(stream_buffer).pop() {
             return Some(result);
         }
     }
 
     // 从后往前搜 messages
     for msg in messages.iter().rev() {
-        if let Some(result) = extract_code_from_text(msg.content.as_str()) {
+        if let Some(result) = extract_code_blocks_from_text(msg.content.as_str()).pop() {
             return Some(result);
         }
     }
     None
-}
-
-fn extract_code_from_text(text: &str) -> Option<(String, String)> {
-    let mut last_code: Option<(String, Vec<String>)> = None;
-    let mut in_block = false;
-    let mut current_lang = String::new();
-    let mut current_lines: Vec<String> = Vec::new();
-
-    for line in text.lines() {
-        let trimmed = line.trim_start();
-        if let Some(stripped) = trimmed.strip_prefix("```") {
-            if in_block {
-                last_code = Some((current_lang.clone(), current_lines.clone()));
-                in_block = false;
-                current_lines.clear();
-            } else {
-                in_block = true;
-                current_lang = stripped.to_string();
-                current_lines.clear();
-            }
-        } else if in_block {
-            current_lines.push(line.to_string());
-        }
-    }
-
-    // 处理未闭合的代码块（流式场景）
-    if in_block && !current_lines.is_empty() {
-        last_code = Some((current_lang, current_lines));
-    }
-
-    last_code.map(|(lang, lines)| {
-        let l = if lang.is_empty() {
-            "text".to_string()
-        } else {
-            lang
-        };
-        (l, lines.join("\n"))
-    })
 }
 
 /// 从文本中提取所有代码块（含未闭合的），返回 (lang, content) 列表
@@ -1815,54 +1748,7 @@ fn send_to_mimo(
     token_tx: &mpsc::Sender<StreamResult>,
     analysis_msg: String,
 ) {
-    state.generating = true;
-    state.stream_buffer.clear();
-    state.spinner_tick = 0;
-
-    // 首条 user 消息注入日期（避免注入到 assistant 消息上）
-    if let Some(first) = state.messages.first() {
-        if first.role == "user" && !first.content.as_str().contains("[Current date:") {
-            let today = chrono_date();
-            state.messages[0]
-                .content
-                .as_mut_str()
-                .push_str(&format!("\n\n[Current date: {}]", today));
-        }
-    }
-
-    let mut msgs = state.messages.clone();
-    msgs.push(ChatMessage {
-        role: "user".to_string(),
-        content: Content::text(analysis_msg),
-        cache_control: None,
-    });
-    // 消息数上限保护（与正常发送路径一致）
-    if msgs.len() > MAX_MESSAGES {
-        let excess = msgs.len() - 150;
-        if excess > 0 {
-            msgs.drain(0..excess);
-        }
-    }
-    apply_cache_breakpoints(&mut msgs);
-
-    let system_text = state.system_prompt_text.clone();
-    let system_content = build_system_content(&system_text);
-
-    let client = Arc::clone(client);
-    let tx = token_tx.clone();
-    let (cancel_tx, cancel_rx) = oneshot::channel();
-    state.cancel_tx = Some(cancel_tx);
-
-    tokio::spawn(async move {
-        tokio::select! {
-            result = client.send_message_stream(&system_content, &msgs, tx.clone()) => {
-                if let Err(e) = result {
-                    let _ = tx.send(StreamResult::Error(e.to_string())).await;
-                }
-            }
-            _ = cancel_rx => {}
-        }
-    });
+    spawn_stream_request(state, client, token_tx, Some(analysis_msg));
 }
 
 /// Shell-escape user-provided args to prevent command injection via `{args}`.

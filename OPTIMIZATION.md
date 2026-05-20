@@ -5,7 +5,7 @@
 
 ---
 
-## 已完成（Phase 2-11 + v0.3.0 Provider 系统 + v0.3.1 实测修复 + v0.3.2 P0/P1 收官）
+## 已完成（Phase 2-11 + v0.3.0-v0.3.6）
 
 以下优化已全部实现，代码编译通过且 0 errors，不要再重复做。
 
@@ -82,12 +82,21 @@
 ```
 输入 `/lint` 即可执行 `cargo clippy`，输出自动发给 MiMo 分析。
 
+### v0.3.6：代码去重 + 架构优化
+
+| # | 优化 | 文件 | 说明 |
+|---|------|------|------|
+| R1 | SSE 流式解析提取 | [api/mod.rs](src/api/mod.rs) | `process_sse_stream()` 泛型函数 + `SseAction` enum，消除 Anthropic/OpenAI 两套流解析器的 UTF-8 解码 + 事件分割重复代码 |
+| R2 | 代码块提取统一 | [app.rs](src/app.rs) | `collect_code_blocks()` 改用 `extract_code_blocks_from_text()`，移除第 4 套内联代码块解析 |
+| R3 | 日期注入 + 异步调度提取 | [app.rs](src/app.rs) | `inject_date_if_needed()` + `spawn_stream_request()`，3 处重复的日期注入+clone+断点+spawn 统一 |
+| R4 | 内置命令常量 | [app.rs](src/app.rs) | `BUILTIN_COMMANDS` 常量替代硬编码列表，消除 `/help` 与提示不一致风险 |
+
 ---
 
-## 待完成优化（v0.3.2 状态）
+## 待完成优化（v0.3.6 状态）
 
 > 优先级定义：**P0**=安全/稳定 | **P1**=核心体验 | **P2**=重要但不急 | **P3**=锦上添花
-> **P0 已全部修复（4/4 ✅），P1 已全部实现（4/4 ✅）。以下 P2/P3 为剩余工作。**
+> **P0 已全部修复（4/4 ✅），P1 已全部实现（4/4 ✅），v0.3.6 代码去重完成。以下 P2/P3 为剩余工作。**
 
 ### P0：安全修复 ✅ 全部完成
 

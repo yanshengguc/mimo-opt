@@ -10,7 +10,7 @@
 
 **一句话：** 类似 ChatGPT/Claude 的终端版，但接的是小米 MiMo API，Tokyo Night 配色，简洁不简陋。
 
-**当前状态：** v0.3.5，P0/P1 全部到位，v0.3.3 bug 全部修复，clippy 0 warnings。桌面端（Tauri）已决定跳过，终端版先交付。
+**当前状态：** v0.3.6，P0/P1 全部到位，v0.3.3 bug 全部修复，clippy 0 warnings。v0.3.6 完成代码去重重构（SSE 解析/代码块提取/日期注入/命令常量）。桌面端（Tauri）已决定跳过，终端版先交付。
 
 ---
 
@@ -58,7 +58,7 @@ C:/test/mimo-opt/
 └── HANDOFF.md                          # 本文档
 ```
 
-**关键文件行数**：app.rs ~1500 | draw.rs ~700 | api/mod.rs ~300 | api/types.rs ~150 | file_ops.rs ~164 | session.rs ~115 | config.rs ~100
+**关键文件行数**：app.rs ~1866 | draw.rs ~720 | api/mod.rs ~447 | api/types.rs ~143 | config.rs ~221 | file_ops.rs ~152 | session.rs ~134
 
 ---
 
@@ -379,8 +379,6 @@ notepad "%APPDATA%\mimo-opt\config.json"
 ## 13. 待完成方向
 
 - [ ] **P2-8** 桌面端迁移（Tauri）— 已决定终端版先交付，桌面端后续再做
-- [ ] 导出会话为 Markdown
-- [ ] 模型热切换（/model 命令）
 - [ ] MCP 支持
 - [ ] HTTP API 模式（无头，CI/CD 集成）
 
