@@ -1,5 +1,242 @@
 # MiMo-OPT 更新日志
 
+## v0.4.1 (2026-05-21) — 文档全面更新 + 安全审计 + 路线图扩展
+
+**目标**: README 反映 v0.4.0 全貌，API 泄露扫描与加固，优化路线图从 13 项扩展到 22 项。
+
+### 安全审计
+
+- **API 泄露扫描**: 全项目 `sk-`/`tp-`/`Bearer` 模式匹配，git 历史回溯检查，**0 处真实泄露**
+- **OPTIMIZATION.md 脱敏**: N4 撤回示例中的占位密钥替换为 `sk-your-secret-api-key`
+- **.gitignore 加固**: 新增 `config.json`、`.env`、`*.key`、`sessions/`、`credentials*` 等 10 条防护规则
+
+### README.md 重写
+
+- 多 Provider 支持表（DeepSeek 默认 / MiMo / OpenAI / 自定义）
+- Markdown 全覆盖说明 + 3 套主题热切换
+- 余额查询 & 三色预警 + 退出用量汇总
+- 4 种 Provider JSON 完整配置示例
+- 新增 `/theme`、`/errors`、`/provider` 命令文档
+- 缓存策略 ASCII 图解
+- 项目结构更新（12 源文件）
+- 评分表 + 优化路线图链接
+- 对比表新增 10 个对比维度（Markdown/主题/余额/Provider/0clippy 等）
+
+### GitHub 仓库
+
+- **Description**: 更新为多 Provider 定位 + 15 个 Topics（`rust` `terminal` `ai-chat` `deepseek` `openai` `tui` `llm` `coding-assistant` 等）
+
+### OPTIMIZATION.md 扩展
+
+- **优先级全面重排**: P0/P1 全部完成 → 新三层（P1 高优先 / P2 功能增强 / P3 锦上添花）
+- **缓存 v3 方案**: W1 日期移出 + W2 System Prompt 拆分 + W3 自适应断点，目标 85-92%
+- **10 项用户视角优化**: N1 代理 / N2 编辑重发 / N3 费用预估 / N4 撤回 / N5 输入框扩展 / N6 异步加载 / N7 diff 预览 / N8 通知 / N9 快捷键 / N10 temperature
+- **U12 芒果猫 Logo**: ANSI 色块启动 banner 设计方案
+- **D1 倒计时**: 21 项 → 约 5 天专注开发
+
+### 修改文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `README.md` | 完全重写，覆盖 v0.4.0 全部功能 |
+| `OPTIMIZATION.md` | +~300 行：缓存 v3 + 10 项用户优化 + 优先级重排 + Logo 设计 + D1 倒计时 |
+| `CHANGELOG.md` | 新增 v0.4.1 + v0.5.0 计划 |
+| `.gitignore` | 加固 10 条安全规则 |
+
+---
+
+## v0.5.0 (计划中) — 缓存 v3 + 用户视角体验补全
+
+**目标**: 缓存命中率 70% → 90%，代理/编辑重发/费用预估/撤回 等 10 项用户呼声最高的体验优化。
+
+### P1 高优先 (5 项)
+
+- **N1 HTTP/SOCKS5 代理**: config.json 新增 `proxy.url` 字段，reqwest 原生支持，国内网络兜底
+- **W1 日期移出缓存前缀**: `inject_date_preamble()` 替代 `inject_date_if_needed()`，messages[0] 跨日不失效。预期 +10-15%
+- **W2 System Prompt 拆分**: `build_system_stable()`/`build_system_dynamic()` 分离，多项目切换缓存不丢。预期 +5-10%
+- **W3 自适应断点布局**: 按对话长度动态分配 4 个 breakpoint。预期 +5-8%
+- **E2 单元测试**: file_ops/config/prompt/cost/session 测试补齐
+
+### P2 功能增强 (10 项)
+
+- **N2 编辑重发**: ↑ 调出上条消息到输入框，编辑后重发
+- **N3 发送前费用预估**: 输入框右侧实时显示 ~¥/tok 数，超过阈值黄色警告
+- **N4 Ctrl+Z 撤回**: 移除最后一条 user+assistant 对话轮次
+- **N5 输入框自适应扩展**: 内容超出时自动扩展，上限半屏
+- **N6 syntect 异步加载**: 启动不阻塞，高亮延后加载
+- **N7 /edit diff 预览**: 确认弹窗红删绿增 unified diff
+- **U11 联网搜索**: `/search` 命令，DeepSeek 原生 > DDG fallback
+- **U1 会话侧边栏**: Ctrl+B 呼出
+- **U12 芒果猫 Logo**: ANSI 色块启动 banner
+- **C1/C2**: clone 优化 + 文件拆分
+
+### P3 锦上添花 (6 项)
+
+- **N8 回复完成通知**: 终端响铃 + 桌面通知
+- **N9 快捷键可配置**: keybindings.json
+- **N10 temperature/top_p 可配**: config 透传
+- **U9/C3/C4**: Shell 管道 + clipboard + token 精度
+
+### 修改文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `Cargo.toml` | 版本 0.4.0 → 0.5.0，新增 notify-rust 依赖 |
+| `src/prompt.rs` | W1 `inject_date_preamble()` + W2 拆分 + W3 自适应 |
+| `src/config.rs` | `proxy`、`web_search`、`temperature`、`top_p` 字段 |
+| `src/api/mod.rs` | proxy 集成 + temperature/top_p 透传 |
+| `src/commands.rs` | `/search` + `/edit` diff 确认 + N2 编辑重发 + N4 撤回 |
+| `src/app.rs` | input_history、undo_stack、异步 syntect、通知触发 |
+| `src/ui/logo.rs` | **新增**: 芒果猫色块 Logo |
+| `src/ui/draw.rs` | 输入框动态扩展 + 费用预估 + diff 弹窗 + Logo 展示 |
+| new `src/search.rs` | DDG API + 结果抓取 |
+| new `tests/` | file_ops / config / prompt 单元测试 |
+
+---
+
+## v0.4.0 (2026-05-21) — Markdown 渲染完善 + 主题热切换
+
+**目标**: 完成 Markdown 渲染全覆盖 + 3 套内置主题随心切换。
+
+### Markdown 渲染完善 (U3 完成)
+
+- **无序列表**: `- ` / `* ` 开头的行渲染为 `  • ` 前缀 + 缩进
+- **有序列表**: `1. ` 开头的行渲染为 `  1. ` 前缀 + 缩进
+- **链接**: `[text](url)` 渲染为青色下划线文本，隐藏裸 URL
+- **水平分隔线**: `---` / `***` / `___` 渲染为全宽分隔线
+- 链接解析同时支持对话区行内和列表项内
+
+### 主题热切换 (U4)
+
+- **主题系统重构**: `ThemeColors` 结构体替代硬编码常量，所有 UI 颜色集中管理
+- **3 套内置主题**:
+  - `tokyo-night` (默认) — 紫蓝暗色系
+  - `nord` — 蓝灰冷色系
+  - `catppuccin` — 柔和暖色系
+- **`/theme <name>` 命令**: 运行时即时切换主题，无需重启
+- **`/theme`** (无参数): 列出所有可用主题，标注当前选择
+- 配置持久化: `config.json` 新增 `theme` 字段，重启后保持选择
+
+### 修改文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `Cargo.toml` | 版本 0.3.9 → 0.4.0 |
+| `src/ui/theme.rs` | 完全重写: `ThemeColors` 结构体 + `TOKYO_NIGHT`/`NORD`/`CATPPUCCIN` 3 套色板 + `get_theme()`/`theme_names()` |
+| `src/ui/mod.rs` | 导出更新: `get_theme`/`theme_names` |
+| `src/ui/draw.rs` | 全部函数接受 `&ThemeColors` 参数；新增列表/链接/分隔线渲染；新增 `render_inline_spans()`/`is_hr_line()`/`is_unordered_list()`/`is_ordered_list()` |
+| `src/config.rs` | Config/ConfigRaw 新增 `theme` 字段 (默认 `"tokyo-night"`) |
+| `src/app.rs` | `/theme` 命令、BUILTIN_COMMANDS 新增 theme、帮助文本、draw 调用传入主题 |
+
+---
+
+## v0.3.9 (2026-05-21) — Markdown 渲染增强
+
+**目标**: 引用块视觉支持 + 粗体/斜体/行内代码渲染。
+
+### 新增功能
+
+- **U8 引用块视觉**: `>` 开头的行渲染为 `│` 竖线 + 缩进 + 斜体蓝灰，与普通对话文字清晰区分
+- **U3 内联 Markdown**:
+  - `**粗体**` → 加粗样式
+  - `*斜体*` → 斜体样式
+  - `` `行内代码` `` → 青字 + `#24283b` 深色背景
+- 新増 `BLOCKQUOTE_BORDER` (#3d59a1) 和 `INLINE_CODE` (#24283b) 配色常量
+- 剔除余额显示 `💰` emoji，保持纯文字风格
+
+### 修改文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `Cargo.toml` | 版本 0.3.8 → 0.3.9 |
+| `src/ui/theme.rs` | 新增 `BLOCKQUOTE_BORDER`、`INLINE_CODE` 颜色常量 |
+| `src/ui/draw.rs` | 引用块 `│` 渲染、`render_markdown_line()` 函数（粗体/斜体/行内代码）、剔除 💰 |
+
+---
+
+## v0.3.8 (2026-05-21) — 实测体验修复
+
+**目标**: 基于 DeepSeek 实机测试发现的 6 项体验问题，快速响应修复。
+
+### 体验修复 (6/6)
+
+- **F1 首次启动 API 状态引导**: 标题栏 `⊛ ...` → `⊛ 发消息检测API`，新用户一目了然
+- **F2 余额货币单位**: DeepSeek 响应中解析 `currency` 字段（CNY→¥, USD→$），余额显示 `💰¥6.33` 而非裸数字
+- **F3 余额颜色预警**: 余额 < ¥1 红色、< ¥5 黄色警告、≥ ¥5 绿色，用完前醒目提醒
+- **F4 会话名友好化**: `Session::auto_name()` 改为 `{目录名}_{HHMM}` 格式（如 `mimo-opt_1045`），替代无意义的 `session-20594_1045`
+- **F5 余额查询失败可见**: 启动或切换 provider 时查询失败，状态栏显示红色错误提示而非静默
+- **F6 退出用量汇总**: Ctrl+Q 退出后在终端打印消息数/token/命中率/费用摘要
+
+### 修改文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `Cargo.toml` | 版本 0.3.7 → 0.3.8 |
+| `src/app.rs` | F5 余额查询失败 → error_message、F6 退出汇总打印、balance_info 类型改为 (String, f64) |
+| `src/api/mod.rs` | F2 解析 currency 字段、返回 (显示文本, 数值) 元组 |
+| `src/session.rs` | F4 会话名用目录名 + 时分 |
+| `src/ui/draw.rs` | F1 API 状态引导文字、F2 货币符号、F3 余额颜色预警（分三档） |
+
+---
+
+## v0.3.7 (2026-05-21) — 工程化夯实
+
+**目标**: 补齐 P2 工程化短板：结构化日志、API 自动重试、DeepSeek 余额查询、消除隐式错误吞没。
+
+### 结构化日志 (E5 / P2-12)
+
+- 新增依赖 `log = "0.4"` + `env_logger = "0.11"`
+- `main.rs`: 初始化 `env_logger`，默认过滤级别 `warn`，可通过 `RUST_LOG=mimo_opt=debug` 启用详细日志
+- 17 个日志点位覆盖关键路径：
+  - `config.rs`: 加载/保存配置
+  - `session.rs`: 加载/保存会话
+  - `api/mod.rs`: 请求发送、重试、流式完成（Anthropic/OpenAI）
+  - `app.rs`: 缓存断点计数、技能执行、会话切换、消息完成
+  - `file_ops.rs`: 文件写入/编辑/备份
+- `util.rs`: 系统时钟异常时输出 `log::warn!`（替换静默 `unwrap_or_default`）
+
+### API 自动重试 (E1 / P2-9)
+
+- `send_message_stream()` 新增循环重试逻辑（最多 3 次）
+- 重试条件：5xx 状态码 / 429 rate limit / 网络错误（timeout、connection reset）
+- 指数退避间隔：2s → 4s → 8s
+- 非幂等错误（4xx）不重试，直接返回错误
+- 重试和错误日志清晰可追踪
+
+### DeepSeek 余额查询 (E4)
+
+- `MiMoClient` 新增 `query_deepseek_balance()` 方法
+- 启动时 provider 为 deepseek 时自动查询余额（`GET /user/balance`）
+- 支持两种余额字段解析：`balance_infos[0].total_balance` 和 `balance` 数值
+- `/provider deepseek` 切换时自动查询余额
+- 标题栏显示 `💰 {balance}` 余额信息
+
+### Bug 修复
+
+- **P3-12** 修复 Anthropic 流式解析中 `output_tokens += 1` 的粗略估算，改为完全依赖 `message_delta` 的准确 usage 计数
+- **P2-10** `now_secs()` 中 `unwrap_or_default()` 改为 `unwrap_or_else(|e| log::warn!(...))`，系统时钟异常不再静默吞错
+
+### 代码质量
+
+- 移除 `ui/draw.rs` 中 2 个未使用的辅助函数
+- 编译：0 errors, 0 warnings (clippy clean)
+
+### 修改文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `Cargo.toml` | 新增 log + env_logger 依赖，版本 0.3.6 → 0.3.7 |
+| `src/main.rs` | 初始化 env_logger |
+| `src/util.rs` | `now_secs()` 系统时钟异常日志 |
+| `src/api/mod.rs` | 自动重试循环、DeepSeek 余额查询、流式完成日志、移除 output_tokens 粗略估算 |
+| `src/config.rs` | 加载/保存日志 |
+| `src/session.rs` | 加载/保存日志 |
+| `src/file_ops.rs` | 写入/编辑/备份日志 |
+| `src/app.rs` | balance_info/balance_rx 字段、缓存断点/技能执行/会话切换日志、消息完成日志 |
+| `src/ui/draw.rs` | 标题栏余额展示、移除 2 个未使用函数 |
+
+---
+
 ## v0.3.6 (2026-05-20) — 代码去重 + 架构优化
 
 **目标**: 消除重复代码，提取公共模式，提升可维护性。零功能变更，零行为变更。
@@ -335,30 +572,20 @@ scopeguard / unicode-width / syntect / cli-clipboard
 
 ## 下一步计划
 
-### v0.3.3 Bug 修复（优先）
-- [ ] B1: SSE `\n\n` → 兼容 `\r\n\r\n` 分隔符（P1，影响一类服务器兼容性）
-- [ ] B2: `collect_code_blocks` 纳入 stream_buffer（P2，Ctrl+Y 行为一致性）
-- [ ] B3: `/read` 行范围 parse 失败报错而非静默 fallback（P2）
-- [ ] B4: `send_to_mimo` 加消息数检查（P2）
-- [ ] B5: 移除 `is_git_repo` 死参数（P2）
-- [ ] B6: Session 持久化 token 计数（P3，但用户体感重要）
-- [ ] B9: 清理 26 个 clippy 警告
+### v0.4.1+ 待完成
 
-### v0.3.3 用户急迫优化（低成本高收益）
-- [ ] U1: Ctrl+V 粘贴支持（~15 行，`cli-clipboard` 已在依赖中）
-- [ ] U2: 代码块深色背景 `bg = #1a1b26`（~5 行，UI_DESIGN 已规划）
-- [ ] U4: 对话轮次分隔线（~10 行，UI_DESIGN 已规划）
-
-### v0.4.0 功能增强
-- [ ] U5: API 余额查询（启动时 `GET /user/balance` 显示在标题栏）
-- [ ] U6: 会话导出 Markdown（`/export [path]` 命令）
-- [ ] U8: Markdown 粗体/斜体/列表/行内代码渲染
-- [ ] U3: 发送前确认（可配置开关）
-
-### 工程化
+**P2 工程化（剩余）**:
 - [ ] 单元测试覆盖（优先 file_ops / config / prompt / cost / session）
-- [ ] API 请求自动重试（网络瞬时故障，最多 3 次指数退避）
-- [ ] 结构化日志（`log` + `env_logger`，关键路径 info/debug/warn）
-- [ ] app.rs 模块拆分（~1600 行 → app / prompt / scanner / cost / commands）
+- [ ] app.rs 模块拆分（~1900 行 → app / prompt / scanner / cost / commands）
 - [ ] GLM / 通义千问 / Kimi 等平台预设完善
+
+**P3 锦上添花**:
+- [ ] U1: 会话侧边栏（Ctrl+B，UI_DESIGN 已规划）
+- [x] U3: Markdown 渲染增强（粗体/斜体 v0.3.9 + 列表/链接/分隔线 v0.4.0）
+- [x] U4: 主题热切换（v0.4.0: Tokyo Night / Nord / Catppuccin + /theme 命令）
+- [x] U8: 引用块视觉支持（v0.3.9: `>` 竖线+缩进+斜体）
+- [ ] U9: Shell 管道集成（`echo "..." | mimo-opt --prompt`）
+
+**已决定后续再做**:
 - [ ] **P2-8** 桌面端迁移（Tauri）— 终端版先交付
+- [ ] MCP 支持

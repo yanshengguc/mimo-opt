@@ -3,3 +3,18 @@
 *.swo
 *~
 .DS_Store
+
+# 防止意外提交敏感信息
+*.env
+*.env.*
+config.json
+config.local.json
+*.secret
+*.key
+*.pem
+credentials*
+
+# 会话数据（含对话历史）
+sessions/
+*.session
+*.session.*

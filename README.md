@@ -1,76 +1,102 @@
 # MiMo-OPT
 
-小米 MiMo API 终端聊天工具 —— Rust 编写的极简客户端，接上 API Key 就能用。
+> **芒果猫** · 终端 AI 编程助手 · v0.4.0
 
-> **测试阶段** — 项目仍在积极开发中目前只有控制台终端可用，后续更新桌面端，功能和接口可能变动。遇到 Bug 或有优化建议，欢迎联系作者 QQ：**2391859666**
+Rust 编写的多 Provider 终端 AI 聊天工具。接上 API Key 就能用，单二进制 ~5MB，零运行时依赖。
 
-## 为什么选 MiMo-OPT
+支持 **DeepSeek / MiMo / OpenAI / 自定义 OpenAI 兼容 API**，开箱即用。
 
-### 缓存优化 — 直接省钱
+> 项目仍在积极开发中，后续更新桌面端（Tauri）。遇到 Bug 或有优化建议，欢迎联系作者 QQ：**2391859666**
 
-大多数终端聊天工具每次请求都发送完整上下文，API 端全部重新计算。MiMo-OPT 实现了 Anthropic Messages API 的前缀缓存机制：
+## 特性
 
-- **System prompt 跨天缓存**：System prompt 不含日期，缓存跨天存活，避免每日重建开销
-- **渐进式多断点**：`messages[0]` + 每 6 条消息一个断点，长对话命中率稳定 70%+
-- **状态栏实时显示** `♻ XX%` 缓存命中率，花了多少钱一目了然
+### 多 Provider 支持
+
+4 种预设 + 自定义 Open​AI 兼容端点，`/provider` 命令运行时热切换，无须重启：
+
+| Provider | API 格式 | 状态 |
+|----------|----------|------|
+| DeepSeek | OpenAI 兼容 (bearer) | ✅ 默认 |
+| MiMo Token Plan | Anthropic | ✅ 已集成 |
+| OpenAI | OpenAI 兼容 (bearer) | ✅ 已集成 |
+| 自定义 | OpenAI 兼容 | ✅ 任意兼容 API |
+
+### 缓存优化 — 省 70%+ 的输入费用
+
+Anthropic 格式支持渐进式多断点前缀缓存，状态栏实时显示 `♻` 命中率：
+
+- **System prompt 缓存**：身份+规则部分稳定缓存，cwd/项目树不含在缓存内不污染
+- **渐进式多断点**：`messages[0]` + 每 5 条一个断点，最多 4 个（Anthropic 上限）
+- **缓存 v3 计划中**：日期移出前缀 + 自适应断点，命中率目标 85-92%
 
 ### 代码块语法高亮
 
-使用 `syntect` 实现 Tokyo Night 配色的语法高亮，支持 100+ 种语言。代码块有深色背景、语言标签边框，流式输出中未闭合的代码块同样着色。
+`syntect` + Tokyo Night 配色，100+ 语言，流式输出中未闭合代码块也实时着色。深色背景 + 语言标签边框。
+
+### Markdown 全覆盖
+
+粗体 / 斜体 / 行内代码 / 引用块（`│` 竖线）/ 有序&无序列表 / 链接 / 水平分隔线 — 七种元素全部渲染。
 
 ### 文件操作
 
-MiMo 直接读/写/编辑项目文件，从"聊天工具"升级为"编码助手"：
+AI 直接读/写/编辑项目文件：
 
 - `/read src/main.rs:42` — 读取文件注入上下文（带行号，支持行范围）
 - `/write src/foo.rs` — 提取对话中最后一个代码块写入文件
-- `/edit src/main.rs fn_old fn_new` — 精确字符串替换
-- 所有写入操作自动备份，路径沙箱防穿越
+- `/edit src/main.rs old_str new_str` — 精确字符串替换
+- 所有写入操作自动备份（5 版本轮转），路径沙箱防穿越和 `.git/` 写入
 
 ### 项目感知
 
-启动时自动扫描当前目录（最多 100 个文件，自动排除 node_modules/target/.git 等），注入 system prompt。AI 开箱就知道你的项目结构，不需要手动描述。
+启动时自动扫描当前目录（最多 100 个文件，自动排除 `node_modules`/`target`/`.git` 等），注入 system prompt。AI 开箱就知道你的项目结构。
 
 ### 技能系统
 
-输入 `/命令名` 执行预配置的 shell 命令，输出自动发送给 MiMo 分析。支持参数传递、5 个内置默认技能、TUI 内管理技能。
+`/命令名` 执行预配置 shell 命令，输出自动发送给 AI 分析。支持参数传递、5 个内置默认技能、TUI 内增删技能。
 
-### 流式 UTF-8 安全解码
+### 3 套内置主题
 
-正确处理跨 chunk 的多字节字符分片问题，中文、emoji 不会断裂。多数同类实现直接 `String::from_utf8` 遇到分片就报错。
+`/theme tokyo-night|nord|catppuccin` 即时切换，无需重启，选择持久化到 config.json。
 
-### 单二进制零依赖
-
-```
-cargo build --release
-```
-
-一个可执行文件，无需 Python/Node 运行时，无需安装外部服务。SSH 到远程服务器直接用。
+| 主题 | 风格 |
+|------|------|
+| Tokyo Night (默认) | 紫蓝暗色 |
+| Nord | 蓝灰冷色 |
+| Catppuccin | 柔和暖色 |
 
 ### 多会话管理
 
-会话自动保存，重启恢复上下文。Ctrl+N 新建会话，F2 切换会话，每 5 条消息自动持久化。
+会话自动保存到 `~/.config/mimo-opt/sessions/`。`Ctrl+N` 新建、`F2` 切换。会话名自动生成为 `{目录名}_{HHMM}` 格式，可辨识。
 
-### 成本追踪
+### 成本追踪 & 余额
 
-状态栏实时显示：
-- 累计 token 数（K）
-- 输入/输出分别计数（↓↑）
-- 缓存命中率（♻）
-- 费用（¥）— 基于 MiMo Token Plan 官方费率
+状态栏实时显示：累计 token 数（K）、输入/输出分别计数（`↓↑`）、缓存命中率（`♻`）、费用（`¥`）。
+
+DeepSeek Provider 启动时自动查询余额，标题栏显示 `¥X.XX`，余额不足时颜色预警（红 < ¥1，黄 < ¥5，绿 ≥ ¥5）。
+
+退出时打印用量汇总：消息数 / token / 命中率 / 总费用。
+
+### 其他
+
+- **UTF-8 安全**：正确处理跨 chunk 多字节字符，中文/emoji 不断裂
+- **单二进制**：~5MB，SSH 到远程服务器直接用
+- **0 clippy warnings**：代码质量基线
+- **Ctrl+V 粘贴**、**Ctrl+Y 复制代码块**、**Ctrl+F 搜索**
+- **长消息确认**：超过 5 行弹确认框防止误触
+- **终端尺寸检查**：< 60×20 显示警告
 
 ## 快速开始
 
 ### 1. 下载
 
-前往 [Releases](https://github.com/yanshengguc/mimo-opt/releases) 下载对应平台的预编译版本：
+前往 [Releases](https://github.com/yanshengguc/mimo-opt/releases) 下载预编译版本：
 
-| 平台 | 文件 | 说明 |
-|------|------|------|
-| Windows x64 | `mimo-opt-x86_64-pc-windows-msvc.zip` | 解压即用 |
-| Linux x64 | `mimo-opt-x86_64-unknown-linux-gnu.tar.gz` | `chmod +x` 后运行 |
-| macOS ARM | `mimo-opt-aarch64-apple-darwin.tar.gz` | M1/M2/M3 Mac |
-| macOS x64 | `mimo-opt-x86_64-apple-darwin.tar.gz` | Intel Mac |
+| 平台 | 文件 |
+|------|------|
+| Windows x64 | `mimo-opt-x86_64-pc-windows-msvc.zip` |
+| Linux x64 | `mimo-opt-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS ARM | `mimo-opt-aarch64-apple-darwin.tar.gz` |
+| macOS x64 | `mimo-opt-x86_64-apple-darwin.tar.gz` |
 
 或从源码构建：
 
@@ -82,7 +108,11 @@ cargo build --release
 
 ### 2. 获取 API Key
 
-前往 [小米 MiMo Token Plan 平台](https://platform.xiaomimimo.com/#/console/subscription) 获取密钥。也支持 [DeepSeek](https://platform.deepseek.com/)、OpenAI 等兼容 API。
+任选一个 Provider：
+
+- [DeepSeek](https://platform.deepseek.com/api_keys) — 推荐，国内注册方便，有免费额度
+- [小米 MiMo](https://platform.xiaomimimo.com/#/console/subscription) — Token Plan 或普通 API
+- [OpenAI](https://platform.openai.com/api-keys) — GPT-4o 系列
 
 ### 3. 首次运行
 
@@ -90,61 +120,83 @@ cargo build --release
 ./target/release/mimo-opt
 ```
 
-首次运行会自动创建配置文件并提示填入 API Key：
+首次运行无配置时会展示 5 种 Provider 的配置引导，编辑 `~/.config/mimo-opt/config.json` 填入密钥后重新运行即可。
 
-```
-MiMo-OPT 首次运行，请配置 API Key
+### 4. 配置参考
 
-配置文件: ~/.config/mimo-opt/config.json
+配置文件位于 `~/.config/mimo-opt/config.json`（Windows: `%APPDATA%\mimo-opt\config.json`）。
 
-请编辑配置文件，填入你的 MiMo Token Plan API Key：
-  "api_key": "tp-你的密钥"
-```
+**DeepSeek（推荐，默认）**：
 
-编辑配置文件后重新运行即可。
-
-### 配置
-
-配置文件位于 `~/.config/mimo-opt/config.json`：
-
-**MiMo Token Plan（Anthropic 格式）**：
 ```json
 {
+  "provider": "deepseek",
+  "api_key": "sk-你的密钥",
+  "base_url": "https://api.deepseek.com",
+  "model": "deepseek-chat",
+  "auth_type": "bearer",
+  "api_format": "openai",
+  "max_tokens": 4096
+}
+```
+
+**MiMo Token Plan（Anthropic 格式，支持缓存）**：
+
+```json
+{
+  "provider": "mimo",
   "api_key": "tp-你的密钥",
   "base_url": "https://token-plan-sgp.xiaomimimo.com/anthropic",
   "model": "mimo-v2-flash",
-  "auth_type": "anthropic"
+  "auth_type": "anthropic",
+  "api_format": "anthropic",
+  "max_tokens": 4096
 }
 ```
 
-**MiMo API（OpenAI Bearer 格式）**：
+**OpenAI**：
+
 ```json
 {
-  "api_key": "你的密钥",
-  "base_url": "https://api.xiaomimimo.com/v1",
-  "model": "mimo-v2-flash",
-  "auth_type": "bearer"
+  "provider": "openai",
+  "api_key": "sk-你的密钥",
+  "base_url": "https://api.openai.com",
+  "model": "gpt-4o-mini",
+  "auth_type": "bearer",
+  "api_format": "openai",
+  "max_tokens": 4096
 }
 ```
+
+**自定义 OpenAI 兼容 API**（GLM、通义千问等）：
+
+```json
+{
+  "provider": "custom",
+  "api_key": "你的密钥",
+  "base_url": "https://api.example.com",
+  "model": "your-model",
+  "auth_type": "bearer",
+  "api_format": "openai",
+  "max_tokens": 4096
+}
+```
+
+### 配置字段说明
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
-| `api_key` | (空) | API Key |
-| `base_url` | `https://token-plan-sgp.xiaomimimo.com/anthropic` | API 端点 |
-| `model` | `mimo-v2-flash` | 模型名称 |
-| `auth_type` | `anthropic` | 认证方式：`anthropic`（api-key header）或 `bearer`（Authorization: Bearer） |
-| `api_format` | `anthropic` | 数据格式：`anthropic`（Anthropic Messages）或 `openai`（OpenAI 兼容） |
-| `max_tokens` | `4096` | 最大输出 token 数 |
-| `skills` | `{}` | 技能命令映射，如 `{"lint": "cargo clippy 2>&1"}` |
+| `provider` | `"deepseek"` | Provider 预设名称：`deepseek` / `mimo` / `openai` / `custom` |
+| `api_key` | (空) | API 密钥 |
+| `base_url` | — | API 端点地址 |
+| `model` | — | 模型名称 |
+| `auth_type` | — | 认证方式：`anthropic`（x-api-key header）或 `bearer`（Authorization: Bearer） |
+| `api_format` | — | 数据格式：`anthropic`（Anthropic Messages API）或 `openai`（OpenAI Chat Completions） |
+| `max_tokens` | `4096` | 单次最大输出 token 数 |
+| `theme` | `"tokyo-night"` | UI 主题：`tokyo-night` / `nord` / `catppuccin` |
+| `skills` | 5 个内置默认 | 技能命令映射，如 `{"lint": "cargo clippy 2>&1"}` |
 
-`auth_type` 和 `api_format` 正交组合，适配不同 API 提供商：
-
-| API | auth_type | api_format | base_url |
-|-----|-----------|------------|----------|
-| MiMo Token Plan | `anthropic` | `anthropic` | `https://token-plan-sgp.xiaomimimo.com/anthropic` |
-| MiMo API | `bearer` | `openai` | `https://api.xiaomimimo.com/v1` |
-| DeepSeek | `bearer` | `openai` | `https://api.deepseek.com` |
-| GLM (智谱) | `bearer` | `openai` | `https://open.bigmodel.cn/api/paas/v4` |
+> `auth_type` 和 `api_format` 正交组合，适配各 Provider 的不同 API 风格。
 
 ## 快捷键
 
@@ -155,37 +207,41 @@ MiMo-OPT 首次运行，请配置 API Key
 | `Ctrl+Q` | 退出（有对话时弹确认框） |
 | `Ctrl+N` | 新建会话 |
 | `F2` | 切换会话 |
-| `Ctrl+F` | 搜索消息 |
+| `Ctrl+F` | 搜索对话中的消息 |
 | `Ctrl+Y` | 复制最后一个代码块到剪贴板 |
 | `Ctrl+V` | 粘贴剪贴板内容 |
 | `↑/↓` | 浏览输入历史 |
+| `←/→` / `Home/End` | 光标移动（UTF-8 安全） |
+| `Ctrl+A/Ctrl+E` | 光标行首/行尾 |
 | `PageUp/PageDown` | 翻页浏览对话 |
 | `Ctrl+Home` | 回到对话底部 |
-| `Home/End` | 光标行首/行尾 |
-| `Ctrl+A/Ctrl+E` | 光标行首/行尾（Emacs 风格） |
 
 ## 内置命令
 
 | 命令 | 功能 |
 |------|------|
 | `/read <path>[:range]` | 读取文件注入上下文（如 `/read src/main.rs:10-50`） |
-| `/write <path>` | 提取对话中最后一个代码块写入文件 |
-| `/edit <path> <old> <new>` | 精确字符串替换 |
-| `/export [path]` | 导出会话为 Markdown（默认 `{session}.md`） |
-| `/clear` | 清空当前对话 |
+| `/write <path>` | 提取对话中最后一个代码块写入文件（需确认） |
+| `/edit <path> <old> <new>` | 精确字符串替换（需确认，自动备份） |
+| `/export [path]` | 导出会话为 Markdown（含元信息，默认 `{session}.md`） |
+| `/clear` | 清空当前对话（需确认） |
+| `/model <name>` | 运行时切换模型（如 `/model deepseek-reasoner`） |
+| `/provider <name>` | 切换 Provider 预设（如 `/provider openai`），自动更新 endpoint/auth/费率 |
+| `/theme <name>` | 切换主题（`tokyo-night` / `nord` / `catppuccin`），立即生效 |
+| `/theme` | 列出所有可用主题 |
 | `/skills` | 列出全部技能 |
 | `/addskill <name> <cmd>` | 添加技能 |
 | `/rmskill <name>` | 删除技能 |
-| `/model <name>` | 运行时切换模型（如 `/model mimo-v2.5`） |
-| `/provider <name>` | 切换 API 提供商预设（如 `/provider deepseek`） |
+| `/errors` | 查看 API 错误历史（最近 20 条） |
 | `/help` | 显示帮助 |
 | `/skill_name [args]` | 执行技能命令（如 `/lint --fix`） |
 
 ## 技能系统
 
-输入 `/命令名` 执行预配置的 shell 命令，输出自动显示在对话区并发送给 MiMo 分析。
+输入 `/命令名` 执行预配置 shell 命令，输出自动显示在对话区并发送给 AI 分析。
 
-配置示例（config.json 的 `skills` 字段）：
+配置示例（`config.json` 的 `skills` 字段）：
+
 ```json
 "skills": {
   "lint": "cargo clippy 2>&1",
@@ -196,62 +252,106 @@ MiMo-OPT 首次运行，请配置 API Key
 }
 ```
 
-使用方式：
-- 输入 `/lint` → 执行 `cargo clippy 2>&1` → MiMo 分析结果
-- 输入 `/lint --fix` → 执行 `cargo clippy --fix 2>&1`（参数传递）
-- 不配置 skills 时自动提供 5 个内置默认：lint/test/build/git/diff
-- `/help` 列出全部可用技能
-- `/skills` 查看详细列表
-- `/addskill` 和 `/rmskill` 在 TUI 内管理技能
+- 输入 `/lint` → 执行 `cargo clippy 2>&1`，输出自动发给 AI 分析
+- 输入 `/lint --fix` → 参数 `--fix` 追加到命令末尾
+- 不配置 `skills` 时自动提供 5 个内置默认：`lint` / `test` / `build` / `git` / `diff`
+- `/addskill <name> <cmd>` 和 `/rmskill <name>` 在 TUI 内管理，自动保存配置
 
-跨平台兼容：Windows 使用 `cmd /C`，其他平台使用 `sh -c`。
+跨平台：Windows 使用 `cmd /C`，其他平台使用 `sh -c`。命令输出经 `shell_escape()` 防护注入。
+
+## 提示词缓存策略
+
+仅在 Anthropic 格式（MiMo Token Plan）下生效。
+
+```
+请求 1: [System ●]  ← 缓存 system prompt
+请求 2: [System] [msg0 ●] [msg1] [msg2] [msg3]  ← system 命中，msg0 新建缓存
+请求 3: [System] [msg0] [msg1] [msg2] [msg3] [msg4 ●] ...  ← system+msg0 命中，msg4 新建
+...
+请求 N: [System] [msg0] [msg1] [msg2 ●] ... [msgN-2 ●] [msgN-1] [msgN]  ← 多断点命中
+```
+
+- System prompt 带 `cache_control: ephemeral`（稳定身份+规则部分）
+- 第一个 user message 带缓存断点
+- 每 5 条消息追加一个断点，最多 4 个（Anthropic 限制）
+- 日期通过 uncached preamble 注入，不破坏缓存前缀（v3 计划）
+- 状态栏 `♻ XX%` 实时显示命中率
 
 ## 技术栈
 
 | 组件 | 选型 |
 |------|------|
-| 语言 | Rust 2021 |
-| TUI | ratatui + crossterm |
-| 异步 | tokio |
-| HTTP | reqwest（流式 + JSON） |
+| 语言 | Rust 2021 edition |
+| TUI 框架 | ratatui 0.29 + crossterm 0.28 |
+| 异步运行时 | tokio (full features) |
+| HTTP 客户端 | reqwest (json + stream) |
 | 序列化 | serde + serde_json |
-| 语法高亮 | syntect |
-| 剪贴板 | cli-clipboard |
+| 语法高亮 | syntect 5 (default-fancy) |
+| 剪贴板 | cli-clipboard 0.4 |
+| 日志 | log + env_logger |
 | 终端安全 | scopeguard |
-| Unicode | unicode-width |
+| Unicode 宽度 | unicode-width 0.2 |
 
 ## 项目结构
 
 ```
 src/
-├── main.rs          # 入口，配置加载 + API Key 检查
-├── config.rs        # 配置文件管理（JSON 读写 + save()）
-├── app.rs           # 应用状态 + 事件循环 + 缓存策略 + 技能/文件/会话/确认（~1500 行）
-├── file_ops.rs      # 文件操作（read/write/edit + 路径沙箱 + 自动备份）
-├── session.rs       # 会话持久化（Session 结构 + JSON 存储）
+├── main.rs           # 入口，首次运行引导 5 种 Provider 方案
+├── config.rs         # 配置管理（Config/ProviderPreset，JSON 读写 0600 权限）
+├── app.rs            # AppState + 事件循环 + 键盘分发（~713 行）
+├── commands.rs       # 命令调度 + 流式请求 + 确认弹窗 + 搜索（~967 行）
+├── prompt.rs         # System prompt 构建 + 缓存断点策略 + 日期注入
+├── scanner.rs        # 项目文件树扫描（100 文件 / 深度 5）
+├── file_ops.rs       # 文件 read/write/edit + 路径沙箱 + 自动备份
+├── session.rs        # 会话持久化（多会话 JSON 存储 + 自动命名）
+├── util.rs           # now_secs() / get_cwd()
 ├── api/
-│   ├── mod.rs       # MiMoClient（流式请求 + SSE 解析）
-│   └── types.rs     # API 类型定义（Content enum + 请求/响应/缓存）
+│   ├── mod.rs        # MiMoClient（流式 SSE + 重试 + RwLock 热切换）
+│   └── types.rs      # API 类型（Content enum + Anthropic/OpenAI 双格式）
 └── ui/
-    ├── mod.rs       # UI 模块导出
-    ├── theme.rs     # Tokyo Night 配色
-    └── draw.rs      # 界面渲染（标题栏/对话区/输入框/状态栏/确认弹窗/搜索栏）
+    ├── mod.rs        # 模块导出
+    ├── theme.rs      # ThemeColors  + 3 套色板
+    └── draw.rs       # 界面渲染（7 区布局 + Markdown + 高亮 + 搜索/确认弹窗）
 ```
+
+## 评分 & 路线图
+
+当前评分 **~8.3/10**（详见 [OPTIMIZATION.md](OPTIMIZATION.md)）。
+
+| 维度 | 分数 |
+|------|------|
+| 安全性 | 8.5 |
+| 稳定性 | 8.0 |
+| 代码质量 | 7.5 |
+| 测试覆盖 | 0.5 |
+| UI/UX | 8.5 |
+| 功能完整度 | 8.0 |
+| 文档质量 | 9.0 |
+| 工程化 | 8.0 |
+
+后续路线：缓存 v3（85-92% 命中率）→ 代理/编辑重发/费用预估/撤回等用户视角优化 → 联网搜索 → 桌面端（Tauri）。目标 v1.0 评分 9.0。
 
 ## 与其他工具的对比
 
 | 特性 | MiMo-OPT | 通用 API 终端工具 | 浏览器聊天 |
 |------|----------|-------------------|------------|
 | 缓存命中优化 | 前缀缓存 + 多断点策略 | 无 | 取决于平台 |
-| 缓存命中率可视化 | ✅ 状态栏实时显示 | ❌ | ❌ |
-| 代码块语法高亮 | ✅ syntect 100+ 语言 | 部分 | ✅ |
-| 项目文件感知 | ✅ 自动扫描注入 | ❌ | ❌ |
-| 文件操作 | ✅ read/write/edit + 备份 | ❌ | ❌ |
-| 技能系统 | ✅ /命令 → MiMo 分析 | ❌ | ❌ |
-| 多会话管理 | ✅ 自动保存 + 切换 | 部分 | ✅ |
-| 流式 UTF-8 安全 | ✅ 跨 chunk 处理 | 部分 | ✅ |
-| 单二进制部署 | ✅ ~5MB | 依赖运行时 | 不适用 |
-| MiMo API 适配 | ✅ Token Plan + 普通 API | 需手动配置 | 需平台支持 |
-| 成本追踪 | ✅ token + 缓存 + 费用 | 通常无 | 部分平台 |
-| 确认机制 | ✅ 破坏性操作需确认 | 无 | 无 |
-| 代码块复制 | ✅ Ctrl+Y 一键复制 | 无 | 手动 |
+| 缓存命中率可视化 | `♻` 状态栏实时显示 | ❌ | ❌ |
+| 代码块语法高亮 | syntect 100+ 语言 | 部分 | ✅ |
+| Markdown 渲染 | 7 种元素全覆盖 | 少 | ✅ |
+| 项目文件感知 | 自动扫描注入 | ❌ | ❌ |
+| 文件操作 | read/write/edit + 自动备份 | ❌ | ❌ |
+| 技能系统 | /命令 → AI 分析 | ❌ | ❌ |
+| 多 Provider | DeepSeek/MiMo/OpenAI/自定义 | 需手动配置 | 取决于平台 |
+| Provider 热切换 | `/provider` 即时切换 | ❌ | ❌ |
+| 主题热切换 | 3 套内置 + `/theme` | 少 | 部分 |
+| 余额查询 & 预警 | DeepSeek 自动查询 + 三色预警 | ❌ | 部分平台 |
+| 多会话管理 | 自动保存 + 命名 + 切换 | 部分 | ✅ |
+| 流式 UTF-8 安全 | 跨 chunk 处理 | 部分 | ✅ |
+| 单二进制部署 | ~5MB | 依赖运行时 | 不适用 |
+| 确认机制 | 破坏性操作需确认 | 无 | 无 |
+| 0 clippy warnings | ✅ | 不保证 | 不适用 |
+
+## License
+
+MIT

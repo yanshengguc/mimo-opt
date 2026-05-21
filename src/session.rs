@@ -50,18 +50,25 @@ impl Session {
     }
 
     pub fn auto_name() -> String {
+        // 用当前工作目录名作为会话名，比 epoch 天数更友好
+        let dir_name = std::env::current_dir()
+            .ok()
+            .and_then(|p| {
+                p.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+            })
+            .unwrap_or_else(|| "default".to_string());
         let ts = now_secs();
-        let days = ts / 86400;
         let secs_of_day = ts % 86400;
         let h = secs_of_day / 3600;
         let m = (secs_of_day % 3600) / 60;
-        // 简易日期（从 1970 天数算年月日太复杂，直接用时间戳缩写）
-        format!("session-{}_{:02}{:02}", days, h, m)
+        format!("{}_{:02}{:02}", dir_name, h, m)
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
         let dir = session_dir()?;
         std::fs::create_dir_all(&dir)?;
+        log::debug!("保存会话: {} ({} 条消息)", self.id, self.messages.len());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -81,6 +88,7 @@ impl Session {
     pub fn load(id: &str) -> anyhow::Result<Self> {
         let dir = session_dir()?;
         let path = dir.join(format!("{}.json", id));
+        log::debug!("加载会话: {}", id);
         let content = std::fs::read_to_string(&path)?;
         let session: Self = serde_json::from_str(&content)?;
         Ok(session)

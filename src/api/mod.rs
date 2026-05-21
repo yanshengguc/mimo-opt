@@ -1,6 +1,7 @@
 mod types;
 
 use std::sync::RwLock;
+use std::time::Duration;
 
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
@@ -97,6 +98,47 @@ impl MiMoClient {
         }
     }
 
+    /// 查询 DeepSeek API 余额，返回 (显示文本, 数值金额)
+    pub async fn query_deepseek_balance(&self) -> Option<(String, f64)> {
+        let url = {
+            let s = self.settings.read().unwrap();
+            format!("{}/user/balance", s.base_url)
+        };
+        let builder = self.client.get(&url);
+        let builder = self.set_auth_headers(builder);
+        match builder.send().await {
+            Ok(resp) => {
+                let body = resp.text().await.unwrap_or_default();
+                log::info!("DeepSeek 余额查询: {}", &body[..body.len().min(200)]);
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
+                    // DeepSeek 格式: balance_infos[0].{currency, total_balance}
+                    if let Some(info) = v["balance_infos"].as_array().and_then(|infos| infos.first()) {
+                        let currency = info["currency"].as_str().unwrap_or("CNY");
+                        let currency_symbol = match currency {
+                            "CNY" => "¥",
+                            "USD" => "$",
+                            _ => "",
+                        };
+                        if let Some(bal) = info["total_balance"].as_str() {
+                            if let Ok(amount) = bal.parse::<f64>() {
+                                return Some((format!("{}{}", currency_symbol, bal), amount));
+                            }
+                        }
+                    }
+                    // 通用格式: balance 数值字段
+                    if let Some(bal) = v.get("balance").and_then(|b| b.as_f64()) {
+                        return Some((format!("¥{:.2}", bal), bal));
+                    }
+                }
+                None
+            }
+            Err(e) => {
+                log::warn!("DeepSeek 余额查询失败: {}", e);
+                None
+            }
+        }
+    }
+
     #[allow(dead_code)]
     pub fn api_url(&self) -> String {
         self.settings.read().unwrap().messages_url.clone()
@@ -146,40 +188,70 @@ impl MiMoClient {
         }
     }
 
-    /// 流式请求，通过 channel 逐 token 返回 StreamResult
+    /// 流式请求，通过 channel 逐 token 返回 StreamResult（含自动重试）
     pub async fn send_message_stream(
         &self,
         system: &[SystemContent],
         messages: &[ChatMessage],
         tx: mpsc::Sender<StreamResult>,
     ) -> anyhow::Result<()> {
-        let builder = {
+        let model = {
             let s = self.settings.read().unwrap();
-            if s.api_format == "openai" {
-                self.build_openai_request(system, messages, &s)
-            } else {
-                self.build_anthropic_request(system, messages, &s)
-            }
+            s.model.clone()
         };
-
-        let response = self.set_auth_headers(builder).send().await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            anyhow::bail!("HTTP {}: {}", status, truncate_body(&body));
-        }
+        log::info!("发送请求: model={}, msgs={}", model, messages.len());
 
         let is_openai = {
             let s = self.settings.read().unwrap();
             s.api_format == "openai"
         };
 
-        if is_openai {
-            self.stream_openai(response, tx).await
-        } else {
-            self.stream_anthropic(response, tx).await
+        for attempt in 0u32..3 {
+            if attempt > 0 {
+                let delay = 2u64.pow(attempt);
+                log::warn!("重试 {}/3，等待 {}s", attempt, delay);
+                tokio::time::sleep(Duration::from_secs(delay)).await;
+            }
+
+            let builder = {
+                let s = self.settings.read().unwrap();
+                if s.api_format == "openai" {
+                    self.build_openai_request(system, messages, &s)
+                } else {
+                    self.build_anthropic_request(system, messages, &s)
+                }
+            };
+
+            let response = match self.set_auth_headers(builder).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    log::warn!("网络错误: {}", e);
+                    if attempt < 2 {
+                        continue;
+                    }
+                    return Err(e.into());
+                }
+            };
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body = response.text().await.unwrap_or_default();
+                log::warn!("API 错误: HTTP {} {}", status, truncate_body(&body));
+                if attempt < 2 && is_retryable(status.as_u16()) {
+                    continue;
+                }
+                return Err(anyhow::anyhow!("HTTP {}: {}", status, truncate_body(&body)));
+            }
+
+            log::debug!("开始接收流式响应");
+            if is_openai {
+                return self.stream_openai(response, tx).await;
+            } else {
+                return self.stream_anthropic(response, tx).await;
+            }
         }
+
+        unreachable!()
     }
 
     // ── Anthropic 格式 ──
@@ -217,7 +289,6 @@ impl MiMoClient {
                     if let Some(delta) = event.delta {
                         if delta.delta_type == "text_delta" {
                             if let Some(text) = delta.text {
-                                output_tokens += 1;
                                 return Ok(SseAction::Token(text));
                             }
                         }
@@ -248,6 +319,12 @@ impl MiMoClient {
         })
         .await;
 
+        log::info!(
+            "流完成(Anthropic): input={}, output={}, cache_read={}",
+            input_tokens,
+            output_tokens,
+            cache_read_tokens
+        );
         let _ = tx
             .send(StreamResult::Done {
                 input_tokens,
@@ -338,6 +415,11 @@ impl MiMoClient {
         })
         .await;
 
+        log::info!(
+            "流完成(OpenAI): input={}, output={}",
+            input_tokens,
+            output_tokens
+        );
         let _ = tx
             .send(StreamResult::Done {
                 input_tokens,
@@ -416,6 +498,11 @@ async fn process_sse_stream<F>(
 
         partial = remaining;
     }
+}
+
+/// 判断 HTTP 错误是否可重试（5xx、429 rate limit）
+fn is_retryable(status: u16) -> bool {
+    status >= 500 || status == 429
 }
 
 fn truncate_body(body: &str) -> String {

@@ -10,6 +10,7 @@ pub struct Config {
     pub auth_type: String,  // "anthropic" | "bearer"
     pub api_format: String, // "anthropic" | "openai"
     pub max_tokens: u32,
+    pub theme: String, // "tokyo-night" | "nord" | "catppuccin"
     pub skills: HashMap<String, String>,
 }
 
@@ -23,6 +24,7 @@ impl std::fmt::Debug for Config {
             .field("auth_type", &self.auth_type)
             .field("api_format", &self.api_format)
             .field("max_tokens", &self.max_tokens)
+            .field("theme", &self.theme)
             .field("skills", &self.skills)
             .finish()
     }
@@ -129,6 +131,7 @@ impl Config {
         let default_preset = &PROVIDERS[0]; // mimo
 
         if path.exists() {
+            log::info!("加载配置: {}", path.display());
             let content = std::fs::read_to_string(&path)?;
             let raw: ConfigRaw = serde_json::from_str(&content)?;
             Ok(Self {
@@ -147,6 +150,7 @@ impl Config {
                     .api_format
                     .unwrap_or_else(|| default_preset.api_format.to_string()),
                 max_tokens: raw.max_tokens.unwrap_or(4096),
+                theme: raw.theme.unwrap_or_else(|| "tokyo-night".to_string()),
                 skills: raw.skills.unwrap_or_default(),
             })
         } else {
@@ -162,6 +166,7 @@ impl Config {
                 auth_type: Some(default_preset.auth_type.to_string()),
                 api_format: Some(default_preset.api_format.to_string()),
                 max_tokens: Some(4096),
+                theme: Some("tokyo-night".to_string()),
                 skills: None,
             };
 
@@ -176,6 +181,7 @@ impl Config {
                 auth_type: default_preset.auth_type.to_string(),
                 api_format: default_preset.api_format.to_string(),
                 max_tokens: 4096,
+                theme: "tokyo-night".to_string(),
                 skills: HashMap::new(),
             })
         }
@@ -183,6 +189,7 @@ impl Config {
 
     pub fn save(&self) -> anyhow::Result<()> {
         let path = Self::config_path()?;
+        log::info!("保存配置: {}", path.display());
         let raw = ConfigRaw {
             provider: Some(self.provider.clone()),
             api_key: Some(self.api_key.clone()),
@@ -191,6 +198,7 @@ impl Config {
             auth_type: Some(self.auth_type.clone()),
             api_format: Some(self.api_format.clone()),
             max_tokens: Some(self.max_tokens),
+            theme: Some(self.theme.clone()),
             skills: if self.skills.is_empty() {
                 None
             } else {
@@ -217,5 +225,6 @@ struct ConfigRaw {
     auth_type: Option<String>,
     api_format: Option<String>,
     max_tokens: Option<u32>,
+    theme: Option<String>,
     skills: Option<HashMap<String, String>>,
 }

@@ -87,6 +87,7 @@ pub fn write_file(path: &Path, content: &str) -> Result<String, String> {
         std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
     }
     std::fs::write(path, content).map_err(|e| format!("写入失败: {}", e))?;
+    log::info!("写入文件: {} ({} B)", path.display(), content.len());
     Ok(format!("已写入 {} ({} B)", path.display(), content.len()))
 }
 
@@ -101,6 +102,7 @@ fn backup_file(path: &Path) -> Result<(), String> {
     let backup_path = backup_dir.join(format!("{}.{}.bak", file_name, ts));
 
     std::fs::copy(path, &backup_path).map_err(|e| format!("备份失败: {}", e))?;
+    log::debug!("备份: {} → {}", path.display(), backup_path.display());
 
     // 清理旧备份，保留最近 5 个
     let prefix = format!("{}.", file_name);
@@ -142,6 +144,7 @@ pub fn apply_edit(path: &Path, old: &str, new: &str) -> Result<String, String> {
     backup_file(path)?;
 
     std::fs::write(path, &new_content).map_err(|e| format!("写入失败: {}", e))?;
+    log::info!("编辑文件: {} ({} 处替换)", path.display(), count);
 
     Ok(format!(
         "已编辑 {} ({} 处替换 → {} B)",

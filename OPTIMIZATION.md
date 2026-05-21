@@ -93,55 +93,539 @@
 
 ---
 
-## 待完成优化（v0.3.6 状态）
+## 待完成优化（v0.4.0 状态）
 
-> 优先级定义：**P0**=安全/稳定 | **P1**=核心体验 | **P2**=重要但不急 | **P3**=锦上添花
-> **P0 已全部修复（4/4 ✅），P1 已全部实现（4/4 ✅），v0.3.6 代码去重完成。以下 P2/P3 为剩余工作。**
+> 优先级定义：**P1**=高优先（安全/稳定性/低成本高收益） | **P2**=功能增强（差异化/用户可感知） | **P3**=锦上添花（有更好，没有也不影响）
+> **P0 安全基线 4/4 ✅ 全部完成 | 原 P1 核心体验 4/4 ✅ 全部完成 | E1/E3/E4/E5 工程化 ✅ 完成**
 
-### P0：安全修复 ✅ 全部完成
+### P1：高优先 — 安全基线 + 低成本高收益
 
-| # | 条目 | 文件 | 状态 |
+| # | 条目 | 估时 | 说明 |
 |---|------|------|------|
-| S1 | API Key 错误消息泄漏 | [api/mod.rs](src/api/mod.rs) | ✅ v0.3.1 |
-| S2 | 配置文件权限未加固 | [config.rs](src/config.rs) [session.rs](src/session.rs) | ✅ v0.3.1 |
-| S3 | 技能系统命令注入 | [app.rs](src/app.rs) | ✅ v0.3.2 |
-| S4 | Config Debug 暴露密钥 | [config.rs](src/config.rs) | ✅ v0.3.1 |
+| E2 | 单元测试 | 1d | 安全基线。file_ops（路径沙箱）/ config（密钥掩码）/ prompt（缓存断点）/ cost / session。OPTIMIZATION.md 已有测试骨架 |
+| W1 | 日期移出缓存前缀 | 1h | **+10-15% 缓存命中率**。`inject_date_preamble()` 替代污染 messages[0] |
+| W2 | System Prompt 拆分 | 1.5h | **+5-10% 缓存命中率**。稳定部分（身份+规则）缓存，动态部分（cwd+文件树）不缓存 |
+| W3 | 自适应断点布局 | 1h | **+5-8% 缓存命中率**。按对话长度动态分配 4 个 breakpoint |
+| N1 | HTTP/SOCKS5 代理 | 2h | 国内用户直连 API 常失败，配置化代理是刚需。`reqwest` 原生支持，仅需配置层 |
 
-### P1：核心体验 ✅ 全部完成
+> 缓存三项（W1+W2+W3）合计 ~3.5h，命中率 70% → 85-92%，严格不降智。N1 代理是网络连通性兜底，应排进 P1。
 
-| # | 条目 | 文件 | 说明 |
+### P2：功能增强 — 差异化价值
+
+| # | 条目 | 估时 | 说明 |
 |---|------|------|------|
-| M1 | `/model` 命令 | [app.rs](src/app.rs) [api/mod.rs](src/api/mod.rs) | ✅ v0.3.2 |
-| M2 | `/provider` 命令 | [app.rs](src/app.rs) [api/mod.rs](src/api/mod.rs) | ✅ v0.3.2 |
-| M3 | 长对话自动管理 | [app.rs](src/app.rs) [ui/draw.rs](src/ui/draw.rs) | ✅ v0.3.2 |
-| M4 | spawn 任务取消机制 | [app.rs](src/app.rs) | ✅ v0.3.2 |
-
-### P2：工程化
-
-| # | 条目 | 文件 | 说明 |
-|---|------|------|------|
-| E1 | API 自动重试 | [api/mod.rs](src/api/mod.rs) | 5xx/timeout/reset 最多 3 次指数退避重试 |
-| E2 | 单元测试 | new `tests/` | file_ops / config / prompt / cost / session 优先 |
-| E3 | SSE channel 有界化 | [app.rs](src/app.rs) [api/mod.rs](src/api/mod.rs) | ✅ 已修复 v0.3.1：`unbounded_channel` → `channel(256)` |
-| E4 | DeepSeek 余额查询 | [main.rs](src/main.rs) | 启动时 `GET /user/balance` 显示余额，标题栏展示 |
-| E5 | 结构化日志 | new dep `log`+`env_logger` | 关键路径加 info/debug/warn 日志 |
-| E6 | app.rs 模块拆分 | [app.rs](src/app.rs) | ~1500 行拆为 app/prompt/scanner/cost/commands 多文件 |
+| U11 | 联网搜索 | 6h | `/search` 命令，DeepSeek 原生 web_search > DDG API Fallback，结果注入对话上下文 |
+| U1 | 会话侧边栏 (Ctrl+B) | 3h | 左侧 24 列侧边栏，会话列表 + 消息数 + 更新时间，UI_DESIGN 已规划 |
+| N2 | 编辑重发 (↑ 调出上条消息) | 1.5h | 发送后想起 typo，按上箭头调出上条消息，编辑后 Ctrl+Enter 重发 |
+| N3 | 发送前费用预估 | 1h | 输入框右侧实时显示 "~¥0.02 / ~800 tok"，超过阈值黄色警告，粘贴大段代码前不必再猜 |
+| N4 | Ctrl+Z 撤回最后一条对话 | 1h | 误发敏感信息（密钥/密码），Ctrl+Z 从对话历史中移除最后一条 user+assistant 对话轮次 |
+| N5 | 输入框自适应扩展 (U7) | 1.5h | 内容超过 3 行时自动扩展，上限半屏，解决粘贴大段代码时盲打问题 |
+| N6 | syntect 异步加载 | 1h | 启动时将语法高亮文件集延后到 tokio::spawn 异步加载，首屏渲染不受阻 |
+| N7 | /edit diff 预览 | 1.5h | `/edit` 确认前展示 unified diff（红删绿增），心里有底再确认写入 |
+| U12 | 终端启动 Logo | 2h | 芒果猫 ANSI 色块像素画 + 版本/Provider/余额信息，启动时展示 1.5s |
+| C1 | 消息列表 clone 优化 | 1h | `Arc<Vec<ChatMessage>>` 替代每次 `messages.clone()`，大对话场景内存和延迟改善 |
+| C2 | commands.rs / draw.rs 拆分 | 2h | commands.rs (967行) → commands/files + commands/skills + commands/search；draw.rs (899行) → chat + modal + widgets |
 
 ### P3：锦上添花
 
-| # | 条目 | 说明 |
-|---|------|------|
-| U1 | 会话侧边栏 (Ctrl+B) | UI_DESIGN 已规划，显示会话列表 |
-| U2 | 代码块深色背景 | 当前只有竖线边框，无背景色 |
-| U3 | Markdown 渲染增强 | 粗体/斜体/列表/引用/链接/分隔线 |
-| U4 | 主题热切换 | 内置 Tokyo Night/Nord/Catppuccin，`/theme` 切换 |
-| U5 | 终端最小尺寸警告 | 窗口 < 60×20 时显示警告 |
-| U6 | 会话导出 Markdown | `/export [path]` 命令 |
-| U7 | 对话轮次分隔线 | 虚线分隔不同轮次 |
-| U8 | 引用块视觉支持 | `>` 引用用竖线+缩进渲染 |
-| U9 | Shell 管道集成 | `echo "..." | mimo-opt --prompt` |
-| U10 | check_api 省配额 | 跳过启动探测，首条消息自然检测 |
-| D1 | 桌面端 Tauri 迁移 | core/gui 分层，feature flag 可选编译，一套代码双模式 |
+| # | 条目 | 估时 | 说明 |
+|---|------|------|------|
+| U9 | Shell 管道集成 | 1h | `echo "..." \| mimo-opt --prompt` 非交互式单次问答 |
+| N8 | 回复完成通知 | 0.5h | 终端响铃 `\x07` + 桌面通知（`notify-rust`），切到其他窗口也能感知回复完成 |
+| N9 | 快捷键可配置 | 2h | `keybindings.json`，允许 Ctrl+Enter→Enter 发送、自定义搜索/侧边栏等快捷键 |
+| N10 | temperature / top_p 可配 | 0.5h | config.json 新增可选 `temperature`、`top_p` 字段，控制模型输出创造性 |
+| C3 | cli-clipboard → arboard | 0.5h | 解决 Wayland 兼容性问题 |
+| C4 | token 计数精度 | 0.5h | 流式过程用 API 返回的精确值替代粗略累加 |
+| D1 | 桌面端 Tauri 迁移 | 2-3d | core/gui 分层，feature flag 可选编译，一套代码双模式 |
+
+---
+
+### D1 倒计时
+
+```
+当前进度: P1 0/5  P2 0/10  P3 0/7
+         ───── 需完成 ─────
+P1 [E2][W1][W2][W3][N1]  →  5 项  (约 2d)
+P2 [U11][U1][N2][N3][N4][N5][N6][N7][U12][C1][C2]  →  10 项  (约 3.5d)
+P3 [U9][N8][N9][N10][C3][C4]  →  6 项  (约 5h)
+         ─────────────────
+         → D1 之前共 21 项优化
+```
+
+> **建议路线**：P1 五件套先做（代理+N1 最直接影响可用性），P2 中 N2 编辑重发和 N3 费用预估性价比最高，P3 N8 通知只 0.5h 可以随手做。D1 桌面端预计需要约 6 天集中开发后才能启动。
+
+---
+
+### N1：HTTP/SOCKS5 代理配置 (P1)
+
+**目标**：国内用户直连 DeepSeek/OpenAI API 常因网络问题失败（timeout、connection reset），支持配置 HTTP/SOCKS5 代理是可用性兜底。
+
+**当前状态**：`reqwest` 的 `Client::builder()` 未设置 `proxy`，所有请求走直连。
+
+**实现**：
+
+**文件**：[config.rs](src/config.rs) + [api/mod.rs](src/api/mod.rs)
+
+```json
+// config.json 新增字段
+{
+  "proxy": {
+    "enabled": true,
+    "url": "http://127.0.0.1:7890",    // HTTP 代理
+    // 或 "socks5://127.0.0.1:1080"     // SOCKS5 代理
+    "no_proxy": "localhost,127.0.0.1"
+  }
+}
+```
+
+```rust
+// api/mod.rs MiMoClient::new()
+let mut client_builder = reqwest::Client::builder()
+    .timeout(Duration::from_secs(120))
+    .pool_idle_timeout(Duration::from_secs(90));
+
+if let Some(proxy_url) = &config.proxy_url {
+    if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
+        client_builder = client_builder.proxy(proxy);
+    }
+}
+```
+
+`reqwest` 原生支持 HTTP/SOCKS5 代理（需启用 `socks` feature），PROXY 环境变量也自动生效。配置层仅需读一个 `proxy_url` 字符串。
+
+**估时**：2h（配置解析 0.5h + client 集成 0.5h + 测试 1h）
+
+---
+
+### N2：编辑重发 —— ↑ 调出上条消息 (P2)
+
+**目标**：发送后发现 typo 或想改措辞，按上箭头调出上条消息到输入框，编辑后重发。
+
+**场景**：
+```
+用户输入: 帮我写一个 Rust HTTP 服务器
+[发送后发现有 typo]
+用户按 ↑ → 输入框恢复 "帮我写一个 Rust HTTP 服务器"
+用户改为: 帮我写一个 Rust HTTP 服务器，支持 TLS
+按 Ctrl+Enter → 作为新消息发送
+```
+
+**实现**：[app.rs](src/app.rs) 键盘处理
+
+- `AppState` 新增 `input_history: Vec<String>`（最多 20 条，仅记录手动输入的消息，不含命令）
+- ↑ 键：`input_history.pop()` → 恢复到 `state.input`，再次 ↑ 调更早的
+- ↓ 键：回到更新的历史
+- 如果当前输入框非空，↑ 第一次先保存当前内容到 `unsent_buffer`，再调历史
+- 编辑后 Ctrl+Enter 正常发送，不修改原对话（这是重发，不是编辑已发送的消息）
+
+**与现有能力的区别**：当前 Ctrl+F 搜索历史消息只能看不能改，N2 是把消息恢复到输入框重新编辑。
+
+**估时**：1.5h（history stack 0.5h + 键盘处理 0.5h + 边界情况 0.5h）
+
+---
+
+### N3：发送前费用预估 (P2)
+
+**目标**：输入框右侧实时显示预估 token 数和费用，粘贴大段代码前不再焦虑。
+
+**UI 位置**：输入框右上方，在 `Ctrl+Enter ↵` 左侧：
+```
+│  › 帮我写一个 Rust HTTP 服务器...              ~¥0.02  ~800tok  Ctrl+Enter ↵ │
+```
+
+**实现**：
+- 中文/英文分别估（中文 ~1.5 tok/字，英文 ~0.75 tok/字，粗略 tiktoken 启发式）
+- 不引入 tiktoken 依赖（太沉），用字符数 × 系数近似，误差在 ±30% 可接受
+- 超过阈值（如 > ¥0.5 或 > 20000 tok）数字变黄/红警告
+- 配合 config 中已有 `input_price` / `output_price` 费率计算
+
+```rust
+fn estimate_tokens(text: &str) -> usize {
+    let chars = text.chars().count();
+    let cjk = text.chars().filter(|c| c >= &'\u{4E00}' && c <= &'\u{9FFF}').count();
+    let ascii = chars - cjk;
+    (cjk as f64 * 1.5 + ascii as f64 * 0.75) as usize
+}
+```
+
+**估时**：1h（token 估算 0.3h + UI 渲染 0.3h + 阈值警告 0.4h）
+
+---
+
+### N4：Ctrl+Z 撤回最后一条对话 (P2)
+
+**目标**：误发敏感信息后，Ctrl+Z 移除当前对话的最后一条 user+assistant 轮次。
+
+**场景**：
+```
+用户误发: sk-your-secret-api-key
+AI 回复: 看起来你发了一个 API key...
+用户按 Ctrl+Z → user 消息和 AI 回复同时从 messages 中删除
+输入框恢复该条消息内容，可以编辑后重发（不含密钥的版本）
+状态栏显示 "已撤回" 2 秒
+```
+
+**实现**：[app.rs](src/app.rs)
+- `undo_last_turn(&mut self)`：移除 messages 最后 2 条（user + assistant），恢复输入框
+- 仅在非生成状态且存在 user+assistant 轮次时可撤回
+- 不可连续撤回（仅撤回最近一轮，避免误操作连锁）
+- 可选：将撤回的消息存入 `undo_stack` 支持 `Ctrl+Shift+Z` 重做
+
+**估时**：1h（撤回逻辑 0.5h + 恢复输入框 0.3h + 状态栏反馈 0.2h）
+
+---
+
+### N5：输入框自适应扩展 (P2)
+
+**目标**：输入框初始 3 行，内容超出时自动扩展，上限半屏。解决粘贴大段代码时盲打问题。
+
+**实现**：[ui/draw.rs](src/ui/draw.rs) + [app.rs](src/app.rs)
+- `draw_input_area()` 不再固定 `Constraint::Length(3)`，改为动态计算：`min(3 + extra_lines, terminal_height / 2)`
+- `extra_lines` = 输入内容总宽度 / 输入框可用宽度（考虑中文占 2 列）
+- 聊天区高度随输入框动态收缩
+- 输入框缩小（内容被删）时，聊天区自动恢复
+
+**已有基础**：`unicode-width` 已在依赖中，可用于计算显示宽度。
+
+**估时**：1.5h（布局计算 0.5h + 动态约束 0.5h + 测试各种窗口大小 0.5h）
+
+---
+
+### N6：syntect 异步加载 (P2)
+
+**目标**：syntect 语法高亮文件集（~2MB .pack）在启动时同步加载会阻塞首屏渲染 1-2 秒。改为异步加载，首屏先渲染普通文本，加载完毕后切换为高亮。
+
+**实现**：[app.rs](src/app.rs) + [ui/draw.rs](src/ui/draw.rs)
+- `SyntaxSet` 和 `Theme` 的 `OnceLock` 初始化从 `new()` 移出
+- 在 `run()` 中 `tokio::spawn` 异步加载
+- `draw_chat_area()` 渲染时检查 `OnceLock` 是否就绪：已就绪用高亮，未就绪用纯文本 + 状态栏提示 `语法高亮加载中...`
+- 加载完成后触发一次 `draw()` 刷新
+
+```rust
+// 改前
+static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
+// new() 中同步加载
+SYNTAX_SET.get_or_init(|| { ... });  // 阻塞 1-2s
+
+// 改后
+tokio::spawn(async {
+    let ss = SyntaxSet::load_defaults_newlines();
+    SYNTAX_SET.set(ss).ok();
+});
+```
+
+**估时**：1h（异步 spawn 0.3h + fallback 渲染 0.3h + 加载完成通知 0.4h）
+
+---
+
+### N7：/edit diff 预览 (P2)
+
+**目标**：`/edit` 确认弹窗中用 unified diff 格式展示改动，红删绿增，心里有底再确认写入。
+
+**当前状态**：`/edit` 确认弹窗显示 `old_string` → `new_string` 的原始文本，长文本下难以辨识改动点。
+
+**实现**：[commands.rs](src/commands.rs) + [ui/draw.rs](src/ui/draw.rs)
+
+- `compute_diff(old: &str, new: &str)` → `Vec<DiffLine>`，对比行级别差异
+- 不引入 `similar` 或 `diff` crate，自己实现简单的 LCS diff（文件操作块通常不超过 20 行，O(n²) 够用）
+- 确认弹窗中每一行用颜色标记：
+  - 绿色 `+` 前缀 = 新增行
+  - 红色 `-` 前缀 = 删除行
+  - 灰色 ` ` 前缀 = 上下文行
+
+```
+╭──────────── /edit 预览 ────────────╮
+│  src/main.rs                       │
+│   1  fn main() {                   │
+│   2      println!("Hello, world!");│
+│ - 3      old_function();           │ ← 红
+│ + 3      new_function();           │ ← 绿
+│   4  }                             │
+│                                    │
+│  Ctrl+Enter 确认  Esc 取消         │
+╰────────────────────────────────────╯
+```
+
+**估时**：1.5h（LCS diff 0.5h + 弹窗渲染 0.5h + 颜色标记 0.5h）
+
+---
+
+### N8：回复完成通知 (P3)
+
+**目标**：AI 回复生成完成后，终端响铃或桌面通知。用户切到其他窗口时也能感知。
+
+**实现**：[app.rs](src/app.rs)
+
+**方案 A — 终端响铃**（零依赖）：
+```rust
+// 流式结束 Done 时
+print!("\x07");  // BEL 字符，终端响铃
+```
+
+**方案 B — 桌面通知**（需 `notify-rust` crate）：
+```rust
+use notify_rust::Notification;
+Notification::new()
+    .summary("MiMo-OPT")
+    .body("回复完成 · 234 tokens · ¥0.0012")
+    .timeout(3000)
+    .show()?;
+```
+
+推荐 A+B：Windows/macOS 用桌面通知，无 GUI 的 Linux 服务器用响铃。Config 中可选开关。
+
+**估时**：0.5h
+
+---
+
+### N9：快捷键可配置 (P3)
+
+**目标**：允许用户自定义快捷键（如 Enter 发送、Ctrl+S 搜索），适配不同习惯。
+
+**实现**：
+
+文件：new `~/.config/mimo-opt/keybindings.json`
+
+```json
+{
+  "send": "Enter",
+  "newline": "Ctrl+Enter",
+  "search": "Ctrl+F",
+  "sidebar": "Ctrl+B",
+  "undo": "Ctrl+Z",
+  "paste": "Ctrl+V",
+  "quit": "Ctrl+Q"
+}
+```
+
+`AppState` 加载时读取 keybindings，键盘事件处理中查表而非硬编码 `KeyCode::Char('d') + KeyModifiers::CONTROL`。
+
+crossterm 的 `KeyEvent` 可以直接序列化/反序列化为字符串，用 `serde_json` 即可。
+
+**估时**：2h（配置结构 0.5h + 查表路由 0.5h + 序列化/反序列化 0.5h + 帮助文本更新 0.5h）
+
+---
+
+### N10：temperature / top_p 可配置 (P3)
+
+**目标**：允许在 config.json 中调整推理参数，控制模型输出创造性。
+
+**实现**：[config.rs](src/config.rs) + [api/mod.rs](src/api/mod.rs)
+
+```json
+// config.json 新增可选字段
+{
+  "temperature": 0.7,
+  "top_p": 0.9
+}
+```
+
+构建 Anthropic/OpenAI 请求时按配置透传，不设默认值（模型用自身默认值）。
+
+```rust
+// AnthropicRequest + OpenAIRequest 新增
+#[serde(skip_serializing_if = "Option::is_none")]
+temperature: Option<f32>,
+#[serde(skip_serializing_if = "Option::is_none")]
+top_p: Option<f32>,
+```
+
+**估时**：0.5h（config + request builder 两层透传）
+
+---
+
+### U11：联网搜索 —— `/search` 命令 + 上下文注入
+
+**目标**：用户在对话中通过 `/search <关键词>` 触发联网搜索，搜索结果自动注入到当前对话上下文，让 AI 基于实时信息回答问题。
+
+**为什么需要**：
+- MiMo/DeepSeek 等模型的知识截止日期有限，无法回答实时问题（新闻、股价、天气等）
+- DeepSeek 虽有官方联网搜索功能，但与 API 分离，终端用户无法在对话中直接触发
+- ChatGPT/Claude 官方客户端的联网能力已成为用户刚需，终端工具若不支持将成为明显短板
+
+**设计方案**：
+
+**方案 A — 搜索引擎 API + 结果注入（推荐）**
+
+```
+用户输入: /search Rust 2026 最新进展
+  → 调用 DDG/Bing/Google 搜索 API
+  → 抓取 Top 5 结果页面的正文内容
+  → 将搜索结果 + 网页内容拼接为上下文，注入到当前对话
+  → 自动发送 "请基于以下搜索结果回答: Rust 2026 最新进展"
+  → AI 基于搜索结果 + 原有上下文生成回答
+```
+
+- **搜索引擎选择**：DDG (免费，无需 API Key) → SerpAPI/Bing (需 Key，质量更高) → Google (需 Key，最贵)
+- **搜索结果处理**：标题 + URL + 摘要 + 页面正文（前 2000 字），最多 5 个结果
+- **上下文注入格式**：
+  ```
+  [联网搜索结果: "Rust 2026 最新进展"]
+  1. Rust 2026 Roadmap 发布 | https://blog.rust-lang.org/...
+     Rust 团队于 2026 年 1 月发布了年度路线图...
+  2. ...
+  ```
+- **缓存感知**：搜索结果作为 user message 注入，不破坏已有的 system prompt 缓存断点
+- **配置化**：
+  ```json
+  {
+    "web_search": {
+      "enabled": true,
+      "engine": "ddg",
+      "api_key": "",
+      "max_results": 5,
+      "timeout_secs": 10
+    }
+  }
+  ```
+
+**方案 B — 利用 DeepSeek 原生联网搜索（OpenAI 兼容格式的 web_search 参数）**
+
+DeepSeek API 在 OpenAI 兼容格式下支持 `tools` 中的 `web_search` 类型：
+```json
+{
+  "model": "deepseek-chat",
+  "messages": [...],
+  "tools": [{
+    "type": "web_search",
+    "web_search": {
+      "search_query": "Rust 2026 最新进展",
+      "enable": true
+    }
+  }]
+}
+```
+- 优点：DeepSeek 官方实现，搜索质量高，无需额外 API Key
+- 缺点：仅 DeepSeek 支持，其他 Provider 需 Fallback 到方案 A
+
+**推荐混合策略**：
+1. Provider 为 `deepseek` 时，优先使用方案 B（原生 web_search tool）
+2. 其他 Provider 或方案 B 不可用时，Fallback 到方案 A（DDG API）
+3. 用户可手动指定搜索引擎：`/search bing Rust news`
+
+**实施步骤**：
+
+| Step | 内容 | 文件 | 估时 |
+|------|------|------|------|
+| 1 | Config 新增 `web_search` 字段 | [config.rs](src/config.rs) | 0.5h |
+| 2 | DDG 搜索 API 封装（`instant_answer` 或 HTML 抓取） | new `src/search.rs` | 2h |
+| 3 | DeepSeek `web_search` tool 透传 | [api/mod.rs](src/api/mod.rs) | 1h |
+| 4 | `/search` 命令实现 + 结果注入对话 | [commands.rs](src/commands.rs) | 1h |
+| 5 | 搜索结果显示 UI（链接 + 摘要的独立消息块） | [ui/draw.rs](src/ui/draw.rs) | 1h |
+| 6 | 超时处理 + 错误 Fallback + 无结果提示 | [search.rs](src/search.rs) | 0.5h |
+
+**与项目现有能力的关联**：
+- 可复用 `reqwest` HTTP 客户端（搜索请求 + 网页抓取）
+- 可复用技能系统的 `/command` 执行模式（`/search` 走同样的命令分发路径）
+- [[project_astrbot_web_search_plugin]] 已有 DDG/Bing/Google 多引擎回退 + LLM 搜索词优化的参考实现，逻辑可直接移植
+
+**评分贡献**：功能完整度 +0.3，UI/UX +0.1
+
+---
+
+### U12：终端启动 Logo —— 芒果猫
+
+**目标**：启动时在终端展示一个芒果猫色块 Logo，提升品牌辨识度和第一印象。参考 Claude Code 的启动 banner 风格。
+
+**设计要求**：
+- 使用 ANSI 24-bit 真彩色块（`\x1b[48;2;R;G;Bm`），终端兼容性好
+- 主体为橘黄/芒果色系（#FF8C00, #FFB347, #FFD700）加猫耳、猫眼特征
+- 紧凑布局，宽 ≤ 40 列，高 ≤ 6 行，适配 60 列最小终端
+- 右侧显示版本号 + Slogan
+- 仅在启动时显示 1 次（非每次渲染），按任意键或 1.5s 后自动消失
+
+**布局参考**：
+```
+╭──────────────────────────────────────────────────╮
+│ ██▓▓██░░░░░░░░▓▓▓▓██    MiMo-OPT  v0.5.0       │
+│ ██▒▒██░░░░░░░░░░░░██    芒果猫 · 终端 AI 助手    │
+│ ██░░░░██▓▓▓▓▓▓██░░██    Provider: DeepSeek      │
+│ ██░░░░░░▓▓▓▓▓▓░░░░██    Model: deepseek-chat    │
+│ ██░░░░░░░░░░░░░░░░██    Balance: ¥4.02          │
+│ ████████████████████    /help 查看命令           │
+╰──────────────────────────────────────────────────╯
+```
+
+**实现**：
+
+**文件**：new `src/ui/logo.rs` + 修改 `src/app.rs`
+
+```rust
+// src/ui/logo.rs
+use ratatui::{
+    layout::Rect,
+    style::{Color, Style},
+    text::{Line, Span},
+    widgets::Paragraph,
+    Frame,
+};
+
+pub fn draw_logo(f: &mut Frame, area: Rect) {
+    // 芒果猫色块 — 8列 x 5行像素画
+    let mango = Color::Rgb(0xFF, 0x8C, 0x00);
+    let mango_light = Color::Rgb(0xFF, 0xB3, 0x47);
+    let mango_dark = Color::Rgb(0xCC, 0x70, 0x00);
+    let cream = Color::Rgb(0xFF, 0xF0, 0xD0);
+    let eye = Color::Rgb(0x2A, 0x2A, 0x3E);
+    let pink = Color::Rgb(0xFF, 0x99, 0xBB);
+
+    let palette = [
+        ("  ", Color::Reset),     // 0 透明
+        ("██", mango),            // 1 芒果主色
+        ("██", mango_light),      // 2 芒果亮色
+        ("██", mango_dark),       // 3 芒果暗色
+        ("██", cream),            // 4 奶油白
+        ("██", eye),              // 5 眼睛
+        ("██", pink),             // 6 粉色（耳内）
+    ];
+
+    // 猫脸像素画 8x5
+    let pixels: &[[usize; 8]] = &[
+        [0, 1, 1, 0, 0, 1, 1, 0],  // 耳朵
+        [6, 1, 1, 4, 4, 1, 1, 6],  // 耳内+额头
+        [0, 1, 5, 1, 1, 5, 1, 0],  // 眼睛行
+        [0, 1, 1, 3, 3, 1, 1, 0],  // 鼻子行
+        [0, 0, 1, 1, 1, 1, 0, 0],  // 嘴巴行
+    ];
+
+    let mut lines: Vec<Line> = Vec::new();
+    for row in pixels {
+        let spans: Vec<Span> = row.iter().map(|&idx| {
+            Span::styled(palette[idx].0, Style::default().bg(palette[idx].1))
+        }).collect();
+        lines.push(Line::from(spans));
+    }
+
+    // 右侧信息
+    let info = vec![
+        Line::from(Span::styled("MiMo-OPT  v0.5.0", Style::default().fg(/* title color */))),
+        Line::from("芒果猫 · 终端 AI 助手"),
+        // ... 动态 provider/model/balance
+    ];
+
+    // 左右布局渲染
+    // ...
+}
+```
+
+**颜色方案**：从主题色板中新增 `logo_mango` / `logo_mango_light` / `logo_ear` 色值，随 `/theme` 切换适配。
+
+**评分贡献**：UI/UX +0.1，品牌辨识度 ↑
+
+---
+
+### v0.3.7 实测反馈（2026-05-21，DeepSeek 实机测试）
+
+> 以下 6 项为实际运行中发现的体验问题，优先级按用户体感排序。
+
+| # | 条目 | 优先级 | 说明 |
+|---|------|--------|------|
+| F1 | 首次启动 API 状态不明确 | P1 | ✅ v0.3.8：标题栏 `⊛ 发消息检测API` 引导新用户 |
+| F2 | 余额缺少货币单位 | P1 | ✅ v0.3.8：解析 currency 字段，显示 `💰¥6.33` |
+| F3 | 余额低时无颜色预警 | P2 | ✅ v0.3.8：< ¥1 红色、< ¥5 黄色、≥ ¥5 绿色 |
+| F4 | 会话名无意义 | P2 | ✅ v0.3.8：`{目录名}_{HHMM}` 替代 epoch 天数 |
+| F5 | 余额查询失败静默 | P2 | ✅ v0.3.8：失败时 error_message 红色提示 |
+| F6 | 退出时缺少用量汇总 | P3 | ✅ v0.3.8：退出后终端打印消息数/token/命中率/费用 |
 
 ---
 
@@ -354,6 +838,185 @@ let hit_rate = if effective_input > 0 {
 5. 如果看到 `♻` 持续在 20% 以下，说明缓存未命中——检查 API 服务端是否支持多断点（MiMo Token Plan 基于 Anthropic 协议，应支持）
 
 > 如果 MiMo API 不支持多断点（只会用第一个 `cache_control`），回退方案：只保留 `messages[0]` 断点 + 移除 `step_by` 循环。单断点 + 去日期仍能将命中率从 15% 提升到 40-55%。
+
+---
+
+### P0-0-b：缓存命中率 v3 —— 从 70-85% 提升到 85-92% ⏳
+
+**目标**：在 v2 基础上修复三个缓存浪费点，将命中率再提升 15-20 个百分点。所有改动均为纯缓存布局调整，**严格不降智**——模型看到的文本内容和顺序完全不变。
+
+**三个浪费来源**：
+
+| # | 浪费点 | 根因 | 预期损失 |
+|---|--------|------|----------|
+| W1 | 日期注入到 messages[0] → 缓存每天失效 | `inject_date_if_needed` 把 `[Current date: YYYY/MM/DD]` 写入 messages[0] 的 content，而 messages[0] 是 cache 断点 | -10~15% |
+| W2 | cwd/项目文件树在 system prompt 缓存内 | system prompt 一个 block 全缓存，切换目录或文件变化 → 整个 system prompt 缓存丢失 | -5~10% |
+| W3 | 固定间距断点 `[0], [3], [8], [13]` | 短对话浪费断点，长对话尾部无覆盖；追问场景最近一轮不在缓存内 | -5~8% |
+
+---
+
+#### W1：日期移出缓存前缀 (P1)
+
+**文件**：[prompt.rs](src/prompt.rs) — `inject_date_if_needed()`
+
+**当前代码**（行 104-113）：
+```rust
+pub fn inject_date_if_needed(messages: &mut [ChatMessage]) {
+    if let Some(first) = messages.first_mut() {
+        if first.role == "user" && !first.content.as_str().contains("[Current date:") {
+            let today = chrono_date();
+            first.content.as_mut_str()
+                .push_str(&format!("\n\n[Current date: {}]", today));
+        }
+    }
+}
+```
+
+**问题**：日期被追加到 messages[0] 的 content 中。而 `apply_cache_breakpoints` 给 messages[0] 设了 `cache_control`，意味着 messages[0] 的完整内容（含日期）被缓存。跨日后 content 变化 → messages[0] 缓存前缀 100% miss。
+
+**改为**：
+```rust
+/// 前置一条不含 cache_control 的日期消息，避免污染 messages[0] 缓存
+pub fn inject_date_preamble(messages: &mut Vec<ChatMessage>) {
+    let today = chrono_date();
+    let date_msg = ChatMessage {
+        role: "user".to_string(),
+        content: Content::text(format!("[Current date: {}]", today)),
+        cache_control: None,  // 不缓存，跨日变化不触发 miss
+    };
+    messages.insert(0, date_msg);
+}
+```
+
+调用侧从 `inject_date_if_needed(&mut msgs)` 改为 `inject_date_preamble(&mut msgs)`。`apply_cache_breakpoints` 中 messages[0] 的索引自动后移到原第一条消息（现在是 messages[1]），无需修改。
+
+**不降智保证**：模型看到的文本 = `"[Current date: 2026/05/21]"` + 原 messages 全部内容，与优化前完全一致。日期始终在第一条 user 消息中（Anthropic 要求首条为 user）。
+
+**预期提升**：跨日场景 messages[0] 缓存从 0% → 100%，**+10-15% 整体命中率**。
+
+---
+
+#### W2：System Prompt 拆分为稳定/动态两块 (P1)
+
+**文件**：[prompt.rs](src/prompt.rs) — `build_system_content()`
+
+**当前代码**（行 93-101）：
+```rust
+pub fn build_system_content(system_text: &str) -> Vec<SystemContent> {
+    vec![SystemContent {
+        content_type: "text".to_string(),
+        text: system_text.to_string(),
+        cache_control: CacheControl { cache_type: "ephemeral".to_string() },
+    }]
+}
+```
+
+系统提示词的**全部内容**（身份、格式规则、cwd、项目文件树）在一个 block 里，整个 block 设了 `cache_control`。cwd 或项目文件变化 → 整个 system prompt 缓存丢失（~500-2000 tokens 重建开销）。
+
+**改为**：
+```rust
+pub fn build_system_content(stable_rules: &str, dynamic_ctx: &str) -> Vec<SystemContent> {
+    vec![
+        // Block 1: 稳定部分 → 缓存
+        SystemContent {
+            content_type: "text".to_string(),
+            text: stable_rules.to_string(),
+            cache_control: CacheControl { cache_type: "ephemeral".to_string() },
+        },
+        // Block 2: 动态部分（cwd + 项目文件树）→ 不缓存
+        SystemContent {
+            content_type: "text".to_string(),
+            text: dynamic_ctx.to_string(),
+            cache_control: CacheControl { cache_type: "ephemeral".to_string() },  // 删除此行
+        },
+    ]
+}
+```
+
+`build_system_prompt_text()` 也拆为两个函数：
+```rust
+pub fn build_system_stable(provider: &str) -> String { /* 仅身份+格式规则 */ }
+pub fn build_system_dynamic(project_tree: &str) -> String { /* cwd + 项目文件树 */ }
+```
+
+**不降智保证**：两个 block 拼接后的文本与优化前完全一致。`type: "text"` 的 system 数组会被 Anthropic API 按顺序拼接处理。
+
+**额外收益**：多项目切换时，稳定部分（身份+规则）缓存跨项目不失效。用户从 `project-a` 切到 `project-b`，仅动态 block 被重建。
+
+**预期提升**：多项目/文件变化场景 system prompt 缓存命中率从 0% → 100%，**+5-10% 整体命中率**。
+
+---
+
+#### W3：自适应断点布局 (P2)
+
+**文件**：[prompt.rs](src/prompt.rs) — `apply_cache_breakpoints()`
+
+**当前代码**（行 116-132）：
+```rust
+pub fn apply_cache_breakpoints(messages: &mut [ChatMessage]) {
+    let n = messages.len();
+    if n == 0 { return; }
+    messages[0].cache_control = Some(CacheControl { ... });
+    let mut placed = 1;
+    for i in (3..n).step_by(5).take(3) {
+        messages[i].cache_control = Some(CacheControl { ... });
+        placed += 1;
+    }
+}
+```
+
+固定 `[0], [3], [8], [13]` 的问题：
+- 3 条消息的短对话：浪费了 [3], [8], [13] 三个断点（根本不存在）
+- 50 条消息的长对话：最后 37 条消息在缓存外，追问场景命中率低
+- 追问是最常见的使用模式 → 最近一轮对话应该在缓存里
+
+**改为**：根据对话长度自适应分配 4 个断点（Anthropic 上限 4 个）
+
+```rust
+pub fn apply_cache_breakpoints(messages: &mut [ChatMessage]) {
+    let n = messages.len();
+    if n == 0 { return; }
+    // 第一个断点始终在 messages[0]
+    messages[0].cache_control = Some(CacheControl { cache_type: "ephemeral".to_string() });
+
+    let max_bp = 4; // Anthropic 上限
+    match n {
+        1..=3 => { /* 仅 [0]，足够 */ }
+        4..=8 => {
+            // [0] + 最近一轮对话
+            if n >= 3 { messages[n - 2].cache_control = Some(...); }
+        }
+        9..=16 => {
+            // [0] + 中点 + 最近一轮
+            messages[n / 2].cache_control = Some(...);
+            messages[n - 2].cache_control = Some(...);
+        }
+        _ => {
+            // [0] + 1/3点 + 2/3点 + 最近一轮
+            messages[n / 3].cache_control = Some(...);
+            messages[2 * n / 3].cache_control = Some(...);
+            messages[n - 2].cache_control = Some(...);
+        }
+    }
+}
+```
+
+**不降智保证**：断点位置变化仅影响缓存边界，不影响模型看到的任何内容。
+
+**预期提升**：长对话追问场景 **+5-8% 命中率**，短对话不浪费断点。
+
+---
+
+#### 综合预期
+
+| 优化 | 难度 | 代码量 | 提升 |
+|------|------|--------|------|
+| W1 日期移出前缀 | 低 | ~20行 | +10-15% |
+| W2 System Prompt 拆分 | 中 | ~35行 | +5-10% |
+| W3 自适应断点 | 低 | ~30行 | +5-8% |
+| **合计** | | **~85行** | 70% → **85-92%** |
+
+> 三项可独立实施，W1 收益最大且最简单，建议优先做。
 
 ---
 
@@ -792,32 +1455,19 @@ fn mask_key(key: &str) -> String {
 
 ---
 
-### 🔵 P2-9：无请求重试机制
+### 🔵 P2-9：无请求重试机制 ✅ 已修复 v0.3.7
 
-**文件**：[api/mod.rs](src/api/mod.rs):99-220
+**文件**：[api/mod.rs](src/api/mod.rs)
 
-**问题**：网络瞬时故障（timeout、connection reset）直接报错给用户，无自动重试。
-
-**修复方案**：对幂等错误（5xx、timeout、connection error）进行最多 3 次重试，间隔 1s/2s/4s 指数退避。
+**修复**：`send_message_stream()` 循环重试 3 次，5xx/429/网络错误触发，指数退避 2s→4s→8s。非幂等 4xx 不重试。
 
 ---
 
-### 🔵 P2-10：unwrap_or_default() 静默吞掉错误
+### 🔵 P2-10：unwrap_or_default() 静默吞掉错误 ✅ 已修复 v0.3.7
 
-**文件**：[session.rs](src/session.rs):24-28, [app.rs](src/app.rs):多处
+**文件**：[util.rs](src/util.rs)
 
-**问题**：`std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default()` 在系统时钟异常时返回 `Duration::ZERO`，导致时间戳为 0，影响会话排序。虽概率极低，但发生时毫无提示。
-
-**修复方案**：引入 `log` crate，至少记录 warning：
-```rust
-let ts = std::time::SystemTime::now()
-    .duration_since(std::time::UNIX_EPOCH)
-    .unwrap_or_else(|_| {
-        log::warn!("系统时钟异常，使用默认时间戳 0");
-        Duration::from_secs(0)
-    })
-    .as_secs();
-```
+**修复**：`now_secs()` 中 `unwrap_or_default()` 改为 `unwrap_or_else(|e| log::warn!("系统时钟异常..."))`。
 
 ---
 
@@ -844,11 +1494,11 @@ src/
 
 ---
 
-### 🔵 P2-12：缺少结构化日志框架
+### 🔵 P2-12：缺少结构化日志框架 ✅ 已修复 v0.3.7
 
-**问题**：整个项目只有 `eprintln!` 和 `error_message` 字段做错误报告，没有日志级别、模块过滤、文件输出能力。线上排查问题时完全依赖界面截图。
+**文件**：[Cargo.toml](Cargo.toml) + 各源文件
 
-**修复方案**：引入 `log` + `env_logger`，在关键路径加日志（API 请求/响应脱敏、缓存命中/失效、文件操作、技能执行、会话保存）。设置 `RUST_LOG=mimo_opt=debug` 启用。
+**修复**：引入 `log` + `env_logger`，17 个日志点位覆盖全部关键路径（API 请求/响应、重试、缓存断点、文件操作、技能执行、会话保存）。`RUST_LOG=mimo_opt=debug` 启用详细日志。
 
 ---
 
@@ -869,13 +1519,11 @@ src/
 
 ---
 
-### 🔵 P2-14：scan_project_tree 存在死参数
+### 🔵 P2-14：scan_project_tree 存在死参数 ✅ 已修复 v0.3.4
 
-**文件**：[app.rs](src/app.rs):1422-1448
+**文件**：[app.rs](src/app.rs)
 
-**问题**：`scan_dir_recursive()` 接受 `is_git_repo: bool` 参数但从未使用。该参数在整个递归链路中传递但无任何逻辑引用——疑似预留但未实现的 `.gitignore` 解析功能。
-
-**修复方案**：删除该参数，或在后续迭代中实现 `.gitignore` 解析。
+**修复**：`is_git_repo` 参数已移除，`scan_dir_recursive()` 签名已精简。
 
 ---
 
@@ -899,36 +1547,27 @@ src/
 
 ---
 
-### 🟢 P3-11：API 探测请求浪费配额
+### 🟢 P3-11：API 探测请求浪费配额 ✅ 已修复 v0.3.5
 
-**文件**：[api/mod.rs](src/api/mod.rs):74-83
+**文件**：[app.rs](src/app.rs)
 
-**问题**：启动时发 `"hi"` 消息探测 API，实际消耗 token 配额。虽微不足道，但可以更优雅。
-
-**优化方案**：跳过启动探测，首条实际消息发送时自然会检测 API 可用性，失败时有足够的错误信息。
+**修复**：跳过启动 `check_api()` 探测，首条消息自然检测 API 可用性。
 
 ---
 
-### 🟢 P3-12：output_tokens 流式中间计数不精确
+### 🟢 P3-12：output_tokens 流式中间计数不精确 ✅ 已修复 v0.3.7
 
-**文件**：[api/mod.rs](src/api/mod.rs):170
+**文件**：[api/mod.rs](src/api/mod.rs)
 
-**问题**：`output_tokens += 1` 假设每个 `text_delta` 事件恰好含 1 个 token。实际上一个 delta 可能包含多个 token。真正的计数值在 `message_delta` 的 `usage.output_tokens` 中。
-
-**优化方案**：去掉 `output_tokens += 1` 的粗略累加，流式过程中显示 "..."，只在 `StreamResult::Done` 时用准确的 usage 更新。
+**修复**：移除 Anthropic 流式解析中 `output_tokens += 1` 的粗略估算，完全依赖 `message_delta` 的准确 usage 计数。
 
 ---
 
-### 🟢 P3-13：对话轮次分隔线（UI_DESIGN 已规划未实现）
+### 🟢 P3-13：对话轮次分隔线 ✅ 已修复 v0.3.5
 
-**文件**：[ui/draw.rs](src/ui/draw.rs):218-303
+**文件**：[ui/draw.rs](src/ui/draw.rs)
 
-**问题**：[UI_DESIGN.md](UI_DESIGN.md) 设计稿中不同轮次对话之间有虚线分隔线（`─ ─ ─ ─ ─`），当前实现中所有消息连续排列，长对话中难以快速定位轮次边界。
-
-**实现方案**：
-- 在 `draw_chat_area()` 中，每条消息（非第一条）前插入虚线分隔线
-- 分隔线颜色使用 `Theme::CODE_BORDER`（#3b4261），保持低调
-- 分隔线样式：`" ─".repeat(max_width / 2)` 形成虚线
+**修复**：不同轮次对话之间已用虚线 `─ ─ ─` 分隔。
 
 ---
 
@@ -963,9 +1602,11 @@ src/
 
 ---
 
-### 🟢 P3-15：代码块深色背景（UI_DESIGN 已规划未实现）
+### 🟢 P3-15：代码块深色背景 ✅ 已修复 v0.3.4
 
-**文件**：[ui/draw.rs](src/ui/draw.rs):267-278
+**文件**：[ui/draw.rs](src/ui/draw.rs)
+
+**修复**：所有代码块行和边框应用 `CODE_BG = #1a1b26` 深蓝黑背景。
 
 **问题**：当前代码块只有左侧竖线边框（`│`），没有背景色填充。[UI_DESIGN.md](UI_DESIGN.md) 配色方案中定义了代码块背景色 #1a1b26。加上背景可以更强地区分代码和对话文字。
 
@@ -1648,16 +2289,16 @@ use tokio::net::TcpListener;
 
 ---
 
-#### 🎯 T-10：主题热切换（UI/UX +0.10）
+#### 🎯 T-10：主题热切换（UI/UX +0.10）✅ 已完成 v0.4.0
 
-**改动**：`app.rs` + `ui/theme.rs`
+**改动**：`app.rs` + `ui/theme.rs` + `config.rs` + `ui/draw.rs`
 
 - 配置文件新增 `"theme": "tokyo-night"` 字段
 - 内置 3 套主题：Tokyo Night（默认）、Nord、Catppuccin
 - `/theme <name>` 命令即时切换，无需重启
-- `ui/theme.rs` 从硬编码常量改为 `Theme` struct，实现 `From<ThemePreset>`
-
-**为什么性价比高**：改动量小（~100 行），但终端截图分享时视觉差异化极大，容易在社交媒体传播。
+- `ui/theme.rs` 从硬编码常量改为 `ThemeColors` struct，3 套 const 色板
+- 所有 draw 函数接受 `&ThemeColors` 参数，运行时动态选择
+- 配色新增：`link_color`、`list_bullet`、`hr_color` 字段
 
 ---
 
@@ -1671,25 +2312,24 @@ use tokio::net::TcpListener;
 
 ---
 
-#### 🎯 T-12：Markdown 渲染增强（UI/UX +0.03）
+#### 🎯 T-12：Markdown 渲染增强（UI/UX +0.03）✅ 已完成 v0.3.9 + v0.4.0
 
-**当前支持**：代码块（syntect 高亮）、普通文本
+**当前支持**：代码块（syntect 高亮）、全部内联和块级元素
 
-**待支持 markdown 元素**：
+**已支持 markdown 元素**：
 
-| 元素 | 当前 | 目标 |
+| 元素 | 状态 | 版本 |
 |------|------|------|
-| `**粗体**` | 无 | 粗体样式 |
-| `*斜体*` | 无 | 斜体样式（终端支持时） |
-| `~~删除线~~` | 无 | 交叉线样式 |
-| `` `行内代码` `` | 无 | 反色/高亮背景 |
-| `- 无序列表` | 缩进显示 | `  • ` 前缀 + 缩进 |
-| `1. 有序列表` | 缩进显示 | `  1. ` 前缀 + 缩进 |
-| `[链接](url)` | 显示为纯文本 | 下划线 + 青色 |
-| `> 引用` | 纯文本 | 竖线 + 缩进（P3-17） |
-| `--- 水平线` | 无 | 全宽分隔线 |
+| `**粗体**` | ✅ 粗体样式 | v0.3.9 |
+| `*斜体*` | ✅ 斜体样式 | v0.3.9 |
+| `` `行内代码` `` | ✅ 青字+深色背景 | v0.3.9 |
+| `> 引用` | ✅ 竖线+缩进+斜体 | v0.3.9 |
+| `[链接](url)` | ✅ 下划线+青色 | v0.4.0 |
+| `- 无序列表` | ✅ `  • ` 前缀+缩进 | v0.4.0 |
+| `1. 有序列表` | ✅ `  1. ` 前缀+缩进 | v0.4.0 |
+| `--- 水平线` | ✅ 全宽分隔线 | v0.4.0 |
 
-**实现**：在 `draw_chat_area()` 中逐行检测行首模式（`**`、`* `、`- `、`1. `、`>` 等），用 `ratatui::Span` 的 `style` 字段做样式叠加。不需要引入 markdown 解析库，正则/前缀匹配即可。
+**实现**：`draw_chat_area()` 中逐行检测模式，`render_markdown_line()` 处理内联元素，`render_inline_spans()` 供列表项复用。
 
 ---
 
@@ -1728,16 +2368,17 @@ ENTRYPOINT ["mimo-opt"]
 
 | 阶段 | 完成项 | 累计分 | 说明 |
 |------|--------|--------|------|
-| **起点** | — | **6.2** | 当前状态 |
-| 安全基线 | P0-1/2/3（审计安全修复）✅ 全部完成 | 6.6 | P0 修复是最低门槛 |
-| **第一梯队** | T-1 测试 + T-2 安全 + T-3 unwrap | **7.5** | 基础补课完成 |
-| 稳定基线 | P1-4/5/6/7/8 + M1/M2/M3/M4 ✅ 全部完成 | **7.7** | 安全+体验全部到位 |
-| **第二梯队** | T-4 拆分 + T-5 CI + T-6 日志 + T-7 重试 | **8.3** | 工程化成熟 |
-| 质量基线 | P2-9~16（审计 P2 修复） | 8.4 | 代码质量和兼容性 |
-| **第三梯队** | T-8 MCP + T-9 导出 + T-10 主题 + T-11 热切换 + T-12 Markdown | **8.7** | 差异化 + 体验 |
-| **第四梯队** | T-13~T-15 | **8.8** | 锦上添花 |
+| **起点** | — | **6.2** | 初始版本 |
+| 安全基线 | P0-1/2/3/4 全部完成 + 原 P1 全部完成 | **7.7** | 安全+体验到位 |
+| **v0.3.x 工程化** | E1 重试 + E3 背压 + E4 余额 + E5 日志 + E6 拆分 + F1-F6 体验修复 | **8.0** | 工程化成熟 |
+| **v0.4.0 主题+Markdown** | U3 Markdown 七元素 + U4 三主题热切换 | **8.3** | UI 差异化完成 |
+| **← 当前 v0.4.0** | | **8.3** | |
+| **P1 缓存+测试** | E2 单元测试 + W1/W2/W3 缓存 v3 | **8.6** | 安全基线 + 成本优化 |
+| **P2 功能增强** | U11 联网搜索 + U1 侧边栏 + U12 Logo + C1/C2 代码优化 | **8.8** | 差异化功能 |
+| **P3 收尾** | U9 管道 + C3/C4 兼容性 | **8.8** | 锦上添花 |
+| **D1 桌面端** | Tauri 迁移 | **9.0** | 双模式部署 |
 
-> **2026-05-19 状态**：P0 4/4 ✅ + P1 4/4 ✅ = 安全基线+稳定基线全部到位，当前评分 ~7.7。
+> **2026-05-21 状态**：v0.4.0，评分 ~8.3。P0 安全 ✅ + 原 P1 体验 ✅ + 工程化 ✅ + UI 差异化 ✅。下一站 P1 四件套（缓存 v3 + 测试），目标 8.6。
 
 ---
 
@@ -1767,7 +2408,7 @@ ENTRYPOINT ["mimo-opt"]
 | 20 | 🟢 P3 | UI | 会话侧边栏（Ctrl+B） | ⏳ |
 | 21 | 🟢 P3 | UI | 代码块深色背景 | ✅ v0.3.4 |
 | 22 | 🟢 P3 | UI | 终端最小尺寸警告 | ✅ v0.3.5 |
-| 23 | 🟢 P3 | UI | 引用块（blockquote）视觉支持 | ⏳ |
+| 23 | 🟢 P3 | UI | 引用块（blockquote）视觉支持 | ✅ v0.3.9 |
 
 ### v0.3.3 Bug 修复状态
 
@@ -2044,12 +2685,14 @@ let end: usize = after[dash_idx + 1..].parse().unwrap_or(0);
 
 ## 项目快照
 
-- **当前版本**：v0.3.5
-- **当前行数**：~3661 行 Rust（11 个源文件）
-- **依赖**：tokio, reqwest, serde, serde_json, ratatui, crossterm, futures-util, dirs, anyhow, scopeguard, unicode-width, syntect, cli-clipboard
+- **当前版本**：v0.4.0
+- **当前行数**：~3900 行 Rust（11 个源文件）
+- **依赖**：tokio, reqwest, serde, serde_json, ratatui, crossterm, futures-util, dirs, anyhow, scopeguard, unicode-width, syntect, cli-clipboard, log, env_logger
 - **编译状态**：通过，0 errors，0 clippy warnings
 - **测试覆盖**：0 tests
 - **API 端点**：4 provider 预设（MiMo Token Plan / DeepSeek / OpenAI / 自定义 OpenAI 兼容）
 - **默认模型**：deepseek-chat（当前配置）
 - **API 格式支持**：Anthropic（默认）/ OpenAI 兼容（DeepSeek 实测通过）
-- **待完成条目**：0 P0 + 0 P1 + 9 P2 + 7 P3（U1-U4/U6/U9-U10/U14 已完成）
+- **主题**：3 套内置（Tokyo Night / Nord / Catppuccin），`/theme` 热切换
+- **Markdown**：粗体/斜体/行内代码/引用/链接/列表/分隔线 全覆盖
+- **待完成条目**：5 P1（E2 + W1/W2/W3 + N1 代理）+ 10 P2（U11/U1/N2-N7/U12/C1/C2）+ 7 P3（U9/N8/N9/N10/C3/C4/D1）= **共 22 项，D1 之前 21 项**

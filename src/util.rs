@@ -4,7 +4,10 @@ use std::path::PathBuf;
 pub fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
+        .unwrap_or_else(|e| {
+            log::warn!("系统时钟异常，使用默认时间戳 0: {:?}", e);
+            std::time::Duration::from_secs(0)
+        })
         .as_secs()
 }
 

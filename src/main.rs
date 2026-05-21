@@ -1,15 +1,21 @@
 mod api;
 mod app;
+mod commands;
 mod config;
 mod file_ops;
+mod prompt;
+mod scanner;
 mod session;
 mod ui;
 mod util;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+
     let mut config = config::Config::load()?;
     config.apply_defaults();
+    log::info!("配置加载完成 provider={} model={}", config.provider, config.model);
 
     if config.api_key.is_empty() {
         eprintln!("MiMo-OPT 首次运行，请配置 API");

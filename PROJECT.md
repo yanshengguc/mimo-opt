@@ -79,22 +79,35 @@
 | | 终端最小尺寸检查 | ✅ |
 | | 错误历史 + /errors 查看 | ✅ |
 | **导出** | /export 会话导出 Markdown | ✅ |
+| **日志** | 结构化日志（log+env_logger） | ✅ v0.3.7 |
+| **重试** | API 自动重试（5xx/429/网络） | ✅ v0.3.7 |
+| **余额** | DeepSeek 余额查询 | ✅ v0.3.7 |
+| **余额增强** | 货币单位 + 颜色预警 | ✅ v0.3.8 |
+| **会话名** | 目录名友好命名 | ✅ v0.3.8 |
+| **退出** | 退出用量汇总打印 | ✅ v0.3.8 |
+| **引用块** | `>` 竖线+缩进渲染 | ✅ v0.3.9 |
+| **Markdown** | 粗体/斜体/行内代码 | ✅ v0.3.9 |
+| **Markdown 完善** | 列表/链接/分隔线 | ✅ v0.4.0 |
+| **主题** | 3 套主题热切换 + /theme | ✅ v0.4.0 |
 
 ### 待完成
 
 | 功能 | 优先级 | 说明 |
 |------|--------|------|
+| 单元测试覆盖 | P2 | file_ops / config / prompt / cost / session |
+| app.rs 模块拆分 | P2 | ~1900 行 → 多文件 |
+| 会话侧边栏 (Ctrl+B) | P3 | UI_DESIGN 已规划 |
+| Shell 管道集成 | P3 | `echo "..." \| mimo-opt --prompt` |
 | 桌面端（Tauri） | P2-8 | 已决定终端版先交付 |
 | MCP 支持 | P3 | |
-| HTTP API 模式 | P3 | |
 
 ---
 
 ## 项目快照
 
-- **当前行数**：~3786 行 Rust（11 个源文件）
-- **依赖**：tokio, reqwest, serde, serde_json, ratatui, crossterm, futures-util, dirs, anyhow, scopeguard, unicode-width, syntect, cli-clipboard
-- **编译状态**：通过，0 warnings
+- **当前行数**：~3850 行 Rust（11 个源文件）
+- **依赖**：tokio, reqwest, serde, serde_json, ratatui, crossterm, futures-util, dirs, anyhow, scopeguard, unicode-width, syntect, cli-clipboard, log, env_logger
+- **编译状态**：通过，0 warnings，clippy clean
 - **API 端点**：MiMo Token Plan / DeepSeek / OpenAI / 自定义（多 Provider 预设）
 - **默认模型**：mimo-v2-flash
 - **Provider**：`/model` 和 `/provider` 运行时热切换

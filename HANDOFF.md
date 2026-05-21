@@ -10,7 +10,7 @@
 
 **一句话：** 类似 ChatGPT/Claude 的终端版，但接的是小米 MiMo API，Tokyo Night 配色，简洁不简陋。
 
-**当前状态：** v0.3.6，P0/P1 全部到位，v0.3.3 bug 全部修复，clippy 0 warnings。v0.3.6 完成代码去重重构（SSE 解析/代码块提取/日期注入/命令常量）。桌面端（Tauri）已决定跳过，终端版先交付。
+**当前状态：** v0.4.0，P0/P1 全部到位，P2 工程化大部分完成，P3 Markdown 全覆盖 + 主题热切换已完成，实测 6 项体验问题全部修复，clippy 0 warnings。
 
 ---
 
@@ -25,6 +25,7 @@
 | 序列化 | serde + serde_json | JSON 处理 |
 | 语法高亮 | syntect 5 (default-fancy) | 代码块着色 |
 | 剪贴板 | cli-clipboard 0.4 | 复制代码块 |
+| 日志 | log 0.4 + env_logger 0.11 | 结构化日志（RUST_LOG=mimo_opt=debug） |
 | 其他 | scopeguard, unicode-width, futures-util, dirs, anyhow | |
 
 编译命令：`cd C:/test/mimo-opt && cargo build`
@@ -58,7 +59,7 @@ C:/test/mimo-opt/
 └── HANDOFF.md                          # 本文档
 ```
 
-**关键文件行数**：app.rs ~1866 | draw.rs ~720 | api/mod.rs ~447 | api/types.rs ~143 | config.rs ~221 | file_ops.rs ~152 | session.rs ~134
+**关键文件行数**：app.rs ~1880 | draw.rs ~700 | api/mod.rs ~500 | api/types.rs ~143 | config.rs ~224 | file_ops.rs ~156 | session.rs ~138
 
 ---
 
@@ -270,6 +271,18 @@ app.rs 从 channel 收到 StreamResult → 更新 AppState → ui/draw.rs 渲染
 - [x] 会话导出 Markdown — `/export [path]`（v0.3.5）
 - [x] 错误历史 — API 错误自动记录 20 条 + `/errors` 查看（v0.3.5）
 - [x] 启动省配额 — 移除 `check_api()` 探测（v0.3.5）
+- [x] 结构化日志 — `log` + `env_logger`，17 个点位覆盖关键路径（v0.3.7）
+- [x] API 自动重试 — 5xx/429/网络错误 3 次指数退避重试（v0.3.7）
+- [x] DeepSeek 余额查询 — 启动时/切换 provider 时查询，标题栏展示（v0.3.7）
+- [x] 修复 output_tokens 流式计数的粗略估算（v0.3.7）
+- [x] 余额货币单位 + 颜色预警（<¥1 红/<¥5 黄/≥¥5 绿）（v0.3.8）
+- [x] 会话名友好化 — `{目录名}_{HHMM}` 替代 epoch 天数（v0.3.8）
+- [x] 退出用量汇总 — 终端打印消息数/token/命中率/费用（v0.3.8）
+- [x] 首次启动 API 状态引导 + 余额查询失败可见（v0.3.8）
+- [x] 引用块视觉 — `>` 竖线+缩进+斜体（v0.3.9）
+- [x] 内联 Markdown — 粗体/斜体/行内代码（v0.3.9）
+- [x] Markdown 渲染完善 — 无序/有序列表 + `[链接](url)` + `---` 分隔线（v0.4.0）
+- [x] 主题热切换 — 3 套内置主题 + `/theme` 命令（v0.4.0）
 
 ---
 
@@ -378,9 +391,29 @@ notepad "%APPDATA%\mimo-opt\config.json"
 
 ## 13. 待完成方向
 
-- [ ] **P2-8** 桌面端迁移（Tauri）— 已决定终端版先交付，桌面端后续再做
+**P2 工程化（剩余）**:
+- [ ] 单元测试覆盖（优先 file_ops / config / prompt / cost / session）
+- [ ] app.rs 模块拆分（~1900 行 → 多文件）
+- [ ] GLM / 通义千问 / Kimi 等平台预设完善
+
+**P3 锦上添花**:
+- [ ] U1: 会话侧边栏（Ctrl+B）
+- [x] U3: Markdown 渲染增强 — 粗体/斜体/行内代码 v0.3.9 + 列表/链接/分隔线 v0.4.0
+- [x] U4: 主题热切换 — Tokyo Night/Nord/Catppuccin + /theme 命令 v0.4.0
+- [x] U8: 引用块视觉支持（blockquote）— v0.3.9
+- [ ] U9: Shell 管道集成
+
+**v0.3.7 实测反馈（6 项，已全部修复 v0.3.8）**:
+- [x] **F1**: 首次启动 `⊛ 发消息检测API` 引导
+- [x] **F2**: 余额 `💰¥6.33` 含货币单位
+- [x] **F3**: 余额 <¥1 红/<¥5 黄/≥¥5 绿
+- [x] **F4**: 会话名 `{目录名}_{HHMM}`
+- [x] **F5**: 余额查询失败 → error_message
+- [x] **F6**: 退出终端打印用量汇总
+
+**已决定后续再做**:
+- [ ] 桌面端迁移（Tauri）— 终端版先交付
 - [ ] MCP 支持
-- [ ] HTTP API 模式（无头，CI/CD 集成）
 
 ---
 
