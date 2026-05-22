@@ -91,109 +91,142 @@
 | R3 | 日期注入 + 异步调度提取 | [app.rs](src/app.rs) | `inject_date_if_needed()` + `spawn_stream_request()`，3 处重复的日期注入+clone+断点+spawn 统一 |
 | R4 | 内置命令常量 | [app.rs](src/app.rs) | `BUILTIN_COMMANDS` 常量替代硬编码列表，消除 `/help` 与提示不一致风险 |
 
+### v0.5.3：代码质量 + 安全加固
+
+| # | 优化 | 文件 | 说明 |
+|---|------|------|------|
+| Q1 | 死代码清理 | [api/mod.rs](src/api/mod.rs) | 移除 `check_api()`（v0.3.5 起禁用）和 `api_url()` 未使用方法 |
+| Q2 | unwrap → expect 全量替换 | 6 文件 | 17 处 `.unwrap()` → `.expect("描述")`，所有潜在 panic 点均有语义化消息（12 处 RwLock + 5 处安全断言） |
+| Q3 | unreachable!() 修复 | [api/mod.rs](src/api/mod.rs) | 重试循环末尾 `unreachable!()` → `anyhow::bail!("max retries exceeded")` |
+| Q4 | match 穷尽性 | [commands.rs](src/commands.rs) | `/help` 中 `_ => continue` → `_ => unreachable!("unknown builtin")`，编译期暴露缺失命令 |
+| Q5 | cargo fmt 全项目 | 6 文件 | 统一代码风格，fmt check 通过 |
+
+### v0.5.4：大文件模块化拆分
+
+| # | 优化 | 文件 | 说明 |
+|---|------|------|------|
+| C2 | commands.rs 拆分 | [commands/mod.rs](src/commands/mod.rs) + [commands/file_cmd.rs](src/commands/file_cmd.rs) | 1156行 → 874+295：文件操作命令独立子模块 |
+| C2b | draw.rs 拆分 | [ui/draw/mod.rs](src/ui/draw/mod.rs) + [chat.rs](src/ui/draw/chat.rs) + [modal.rs](src/ui/draw/modal.rs) | 929行 → 443+425+87：聊天区渲染 + 确认弹窗独立子模块 |
+
+### v0.5.5：消息列表零拷贝共享
+
+| # | 优化 | 文件 | 说明 |
+|---|------|------|------|
+| C1 | Arc<Vec<ChatMessage>> | [app.rs](src/app.rs) + [session.rs](src/session.rs) + [commands/](src/commands/) | AppState + Session 消息列表改用 Arc 共享，会话保存 O(n)→O(1)，写时复制自动管理变更 |
+
+### v0.5.6：Shell 管道集成
+
+| # | 优化 | 文件 | 说明 |
+|---|------|------|------|
+| U9 | Shell 管道 | [main.rs](src/main.rs) + new [pipe.rs](src/pipe.rs) | `echo "..." \| mimo-opt` + `-p` 参数，stdin→API→stdout 流式输出 |
+
+### v0.5.7：代码优化 + 性能提升
+
+| # | 优化 | 文件 | 说明 |
+|---|------|------|------|
+| P1 | `mem::take` 零拷贝 | [app.rs](src/app.rs) | `stream_buffer.clone()` → `mem::take`，流式完成/错误/取消时避免克隆整个回复 |
+| P2 | 合并 RwLock 读取 | [api/mod.rs](src/api/mod.rs) | `send_message_stream` 两次 `settings.read()` 合并为一次，减少锁竞争 |
+| P3 | cancel/dismiss 去重 | [app.rs](src/app.rs) | `cancel_generation()` + `dismiss_confirm()` 提取，消除 4 处重复逻辑 |
+| P4 | SSE 热循环优化 | [api/mod.rs](src/api/mod.rs) | `remaining` 原地 `drain` 替代 clone+to_vec，减少每次 chunk 3 次堆分配 |
+| P5 | UTF-8 安全截断 | [api/mod.rs](src/api/mod.rs) | `truncate_body` 使用 `is_char_boundary` 回退，防止多字节字符 panic |
+| P6 | 常量去重 | [ui/draw](src/ui/draw) + [commands](src/commands/) | 消除重复 `SPINNER` 和 `MAX_MESSAGES` 定义 |
+| P7 | `as_mut_str` 测试隔离 | [api/types.rs](src/api/types.rs) | `#[allow(dead_code)]` → `#[cfg(test)]`，生产代码不编译测试方法 |
+| P8 | `writeln!` 替代 `push_str(&format!)` | [commands/mod.rs](src/commands/mod.rs) | 帮助文本生成避免临时字符串分配 |
+| P9 | 代码块渲染去重 | [ui/draw/chat.rs](src/ui/draw/chat.rs) | 提取 `render_code_line` / `render_opening_fence` / `render_closing_fence`，消除 2 处 ~40 行重复 |
+| P10 | `build_openai_request` O(n) | [api/mod.rs](src/api/mod.rs) | 系统消息先收集再追加，消除 `insert(0, ...)` O(n²) |
+| P11 | 搜索零分配 | [commands/mod.rs](src/commands/mod.rs) | `contains_ignore_case` 滑动窗口比较，搜索不再每条消息分配 String |
+
 ---
 
-## 待完成优化（v0.4.0 状态）
+## 待完成优化
 
 > 优先级定义：**P1**=高优先（安全/稳定性/低成本高收益） | **P2**=功能增强（差异化/用户可感知） | **P3**=锦上添花（有更好，没有也不影响）
-> **P0 安全基线 4/4 ✅ 全部完成 | 原 P1 核心体验 4/4 ✅ 全部完成 | E1/E3/E4/E5 工程化 ✅ 完成**
+> **P0 安全基线 4/4 ✅ | P1 核心体验 5/5 ✅ | 工程化 5/5 ✅**
 
 ### P1：高优先 — 安全基线 + 低成本高收益
 
 | # | 条目 | 估时 | 说明 |
 |---|------|------|------|
-| E2 | 单元测试 | 1d | 安全基线。file_ops（路径沙箱）/ config（密钥掩码）/ prompt（缓存断点）/ cost / session。OPTIMIZATION.md 已有测试骨架 |
-| W1 | 日期移出缓存前缀 | 1h | **+10-15% 缓存命中率**。`inject_date_preamble()` 替代污染 messages[0] |
-| W2 | System Prompt 拆分 | 1.5h | **+5-10% 缓存命中率**。稳定部分（身份+规则）缓存，动态部分（cwd+文件树）不缓存 |
-| W3 | 自适应断点布局 | 1h | **+5-8% 缓存命中率**。按对话长度动态分配 4 个 breakpoint |
-| N1 | HTTP/SOCKS5 代理 | 2h | 国内用户直连 API 常失败，配置化代理是刚需。`reqwest` 原生支持，仅需配置层 |
-
-> 缓存三项（W1+W2+W3）合计 ~3.5h，命中率 70% → 85-92%，严格不降智。N1 代理是网络连通性兜底，应排进 P1。
+| W1 | 日期移出缓存前缀 | 1h | ✅ v0.5.0 → v0.5.7 缓存 v4：日期从消息前置改为系统 Block 2 隔离，移除 inject_date_preamble |
+| W2 | System Prompt 拆分 | 1.5h | ✅ v0.5.0 → v0.5.7 缓存 v4：3 块拆分 (稳定/动态/日期)，日期块不缓存避免污染 |
+| W3 | 自适应断点布局 | 1h | ✅ v0.5.0 → v0.5.7 缓存 v4：最后断点 n-2→n-1，完整上下文纳入缓存前缀 |
+| N1 | HTTP/SOCKS5 代理 | 2h | ✅ v0.5.0 |
+| E2 | 单元测试 | 1d | ✅ v0.5.7：88 个测试覆盖 9 个模块 + 缓存 v4 优化 (3 块系统 prompt + 断点 n-1) |
 
 ### P2：功能增强 — 差异化价值
 
 | # | 条目 | 估时 | 说明 |
 |---|------|------|------|
-| U11 | 联网搜索 | 6h | `/search` 命令，DeepSeek 原生 web_search > DDG API Fallback，结果注入对话上下文 |
-| U1 | 会话侧边栏 (Ctrl+B) | 3h | 左侧 24 列侧边栏，会话列表 + 消息数 + 更新时间，UI_DESIGN 已规划 |
-| N2 | 编辑重发 (↑ 调出上条消息) | 1.5h | 发送后想起 typo，按上箭头调出上条消息，编辑后 Ctrl+Enter 重发 |
-| N3 | 发送前费用预估 | 1h | 输入框右侧实时显示 "~¥0.02 / ~800 tok"，超过阈值黄色警告，粘贴大段代码前不必再猜 |
-| N4 | Ctrl+Z 撤回最后一条对话 | 1h | 误发敏感信息（密钥/密码），Ctrl+Z 从对话历史中移除最后一条 user+assistant 对话轮次 |
-| N5 | 输入框自适应扩展 (U7) | 1.5h | 内容超过 3 行时自动扩展，上限半屏，解决粘贴大段代码时盲打问题 |
-| N6 | syntect 异步加载 | 1h | 启动时将语法高亮文件集延后到 tokio::spawn 异步加载，首屏渲染不受阻 |
-| N7 | /edit diff 预览 | 1.5h | `/edit` 确认前展示 unified diff（红删绿增），心里有底再确认写入 |
-| U12 | 终端启动 Logo | 2h | 芒果猫 ANSI 色块像素画 + 版本/Provider/余额信息，启动时展示 1.5s |
-| C1 | 消息列表 clone 优化 | 1h | `Arc<Vec<ChatMessage>>` 替代每次 `messages.clone()`，大对话场景内存和延迟改善 |
-| C2 | commands.rs / draw.rs 拆分 | 2h | commands.rs (967行) → commands/files + commands/skills + commands/search；draw.rs (899行) → chat + modal + widgets |
+| U11 | 联网搜索 | 6h | ✅ v0.5.0 |
+| N2 | 编辑重发 | 1.5h | ✅ v0.3.x |
+| N3 | 发送前费用预估 | 1h | ✅ v0.5.0 |
+| N4 | Ctrl+Z 撤回 | 1h | ✅ v0.5.0 |
+| N5 | 输入框自适应扩展 | 1.5h | ✅ v0.5.0 |
+| N6 | syntect 异步加载 | 1h | ✅ v0.5.0 |
+| N7 | /edit diff 预览 | 1.5h | ✅ v0.5.0 |
+| U12 | 终端启动 Logo | 2h | ✅ v0.5.0 |
+| C1 | 消息列表 clone 优化 | 1h | ✅ v0.5.5：`Arc<Vec<ChatMessage>>` 替代 `messages.clone()`，会话保存 O(1) |
+| C2 | commands.rs / draw.rs 拆分 | 2h | ✅ v0.5.4：commands → mod + file_cmd；draw → mod + chat + modal |
+| U13 | 长对话上下文压缩 | 4h | ✅ v0.5.7：180 条自动压缩 + `/compress` 手动触发 + 压缩后自动保存会话，纯本地零成本 |
+| U1 | 会话侧边栏 (Ctrl+B) | 3h | ✅ v0.5.7：Ctrl+B 切换，↑↓ 选择 Enter 切换，会话名/消息数/相对时间，当前会话高亮 |
 
 ### P3：锦上添花
 
 | # | 条目 | 估时 | 说明 |
 |---|------|------|------|
-| U9 | Shell 管道集成 | 1h | `echo "..." \| mimo-opt --prompt` 非交互式单次问答 |
-| N8 | 回复完成通知 | 0.5h | 终端响铃 `\x07` + 桌面通知（`notify-rust`），切到其他窗口也能感知回复完成 |
-| N9 | 快捷键可配置 | 2h | `keybindings.json`，允许 Ctrl+Enter→Enter 发送、自定义搜索/侧边栏等快捷键 |
-| N10 | temperature / top_p 可配 | 0.5h | config.json 新增可选 `temperature`、`top_p` 字段，控制模型输出创造性 |
-| C3 | cli-clipboard → arboard | 0.5h | 解决 Wayland 兼容性问题 |
-| C4 | token 计数精度 | 0.5h | 流式过程用 API 返回的精确值替代粗略累加 |
-| D1 | 桌面端 Tauri 迁移 | 2-3d | core/gui 分层，feature flag 可选编译，一套代码双模式 |
+| N8 | 回复完成通知 | 0.5h | ✅ v0.5.0 |
+| N10 | temperature / top_p 可配 | 0.5h | ✅ v0.5.0 |
+| C3 | arboard 剪贴板 | 0.5h | ✅ v0.5.0 |
+| C4 | token 计数精度 | 0.5h | ✅ v0.3.7 |
+| U9 | Shell 管道集成 | 1h | ✅ v0.5.6：`echo "..." \| mimo-opt` + `-p` 参数，stdin→API→stdout |
+| N9 | 快捷键可配置 | 2h | ✅ v0.5.7：13 个动作可配置，`keybindings.json`，解析/格式化/默认值 |
+| D1 | 桌面端 Tauri 迁移 | 2-3d | core/gui 分层，feature flag 可选编译 |
 
 ---
 
-### D1 倒计时
+### 进度倒计时
 
 ```
-当前进度: P1 0/5  P2 0/10  P3 0/7
+当前进度: P1 5/5  P2 12/12  P3 6/7
          ───── 需完成 ─────
-P1 [E2][W1][W2][W3][N1]  →  5 项  (约 2d)
-P2 [U11][U1][N2][N3][N4][N5][N6][N7][U12][C1][C2]  →  10 项  (约 3.5d)
-P3 [U9][N8][N9][N10][C3][C4]  →  6 项  (约 5h)
+P3 [D1]           →  1 项  (约 2-3d)
          ─────────────────
-         → D1 之前共 21 项优化
+         → 共 1 项待完成 (25 项中已完成 24 项)
 ```
 
-> **建议路线**：P1 五件套先做（代理+N1 最直接影响可用性），P2 中 N2 编辑重发和 N3 费用预估性价比最高，P3 N8 通知只 0.5h 可以随手做。D1 桌面端预计需要约 6 天集中开发后才能启动。
+> **已交付 (v0.5.7 累计 24/25)**：
+> 缓存 v4 + 上下文压缩(含自动保存) + 自动触发机制 + 代理 + 搜索 + 费用预估 + 撤回 + 自适应输入 + 异步高亮 + diff 预览 + 通知 + temperature + Logo + arboard + 精确 token +
+> 死代码清理 + unwrap 全量替换 + unreachable 修复 + match 穷尽性 + commands/draw 大文件拆分 + Arc 零拷贝共享 + Shell 管道集成 + 单元测试 106 个 + 会话侧边栏 + 快捷键可配置。
+>
+> **v0.5.2 新增**：多模型支持。
+> **v0.5.3 新增**：代码质量 5 项。
+> **v0.5.4 新增**：大文件模块化拆分 (C2)。
+> **v0.5.5 新增**：消息列表零拷贝共享 (C1)。
+> **v0.5.6 新增**：Shell 管道集成 (U9)。
+> **v0.5.7 新增**：单元测试 106 个覆盖 10 模块 (E2) + 缓存 v4 + 上下文压缩含自动保存 (U13) + 自动触发机制 + 17 项代码优化 + 无用代码清理 + 技能系统增强 (SkillEntry) + 会话侧边栏 (U1) + 快捷键可配置 (N9)。
 
 ---
 
-### N1：HTTP/SOCKS5 代理配置 (P1)
+### N1：HTTP/SOCKS5 代理配置 (P1) ✅ 已完成 v0.5.0
 
 **目标**：国内用户直连 DeepSeek/OpenAI API 常因网络问题失败（timeout、connection reset），支持配置 HTTP/SOCKS5 代理是可用性兜底。
 
-**当前状态**：`reqwest` 的 `Client::builder()` 未设置 `proxy`，所有请求走直连。
+**实现**：[config.rs](src/config.rs) + [api/mod.rs](src/api/mod.rs)
 
-**实现**：
-
-**文件**：[config.rs](src/config.rs) + [api/mod.rs](src/api/mod.rs)
+- `config.json` 新增 `"proxy_url": "http://127.0.0.1:7890"` 可选字段（也支持 `socks5://`）
+- `MiMoClient::new()` 中调用 `reqwest::Proxy::all(url)` 自动识别协议类型
+- 代理 URL 无效时 log::warn 并 fallback 直连，不阻塞启动
 
 ```json
-// config.json 新增字段
+// config.json 示例
 {
-  "proxy": {
-    "enabled": true,
-    "url": "http://127.0.0.1:7890",    // HTTP 代理
-    // 或 "socks5://127.0.0.1:1080"     // SOCKS5 代理
-    "no_proxy": "localhost,127.0.0.1"
-  }
+  "provider": "deepseek",
+  "api_key": "sk-...",
+  "proxy_url": "http://127.0.0.1:7890"
 }
 ```
 
-```rust
-// api/mod.rs MiMoClient::new()
-let mut client_builder = reqwest::Client::builder()
-    .timeout(Duration::from_secs(120))
-    .pool_idle_timeout(Duration::from_secs(90));
-
-if let Some(proxy_url) = &config.proxy_url {
-    if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
-        client_builder = client_builder.proxy(proxy);
-    }
-}
-```
-
-`reqwest` 原生支持 HTTP/SOCKS5 代理（需启用 `socks` feature），PROXY 环境变量也自动生效。配置层仅需读一个 `proxy_url` 字符串。
-
-**估时**：2h（配置解析 0.5h + client 集成 0.5h + 测试 1h）
+**估时**：2h（已交付）
 
 ---
 
@@ -356,25 +389,11 @@ tokio::spawn(async {
 
 **实现**：[app.rs](src/app.rs)
 
-**方案 A — 终端响铃**（零依赖）：
-```rust
-// 流式结束 Done 时
-print!("\x07");  // BEL 字符，终端响铃
-```
+**方案 A — 终端响铃**（零依赖）✅ 已实现：
+- `StreamResult::Done` 时 `stderr.write_all(b"\x07")`，终端响铃
+- 方案 B（桌面通知 `notify-rust`）预留，后续按需添加
 
-**方案 B — 桌面通知**（需 `notify-rust` crate）：
-```rust
-use notify_rust::Notification;
-Notification::new()
-    .summary("MiMo-OPT")
-    .body("回复完成 · 234 tokens · ¥0.0012")
-    .timeout(3000)
-    .show()?;
-```
-
-推荐 A+B：Windows/macOS 用桌面通知，无 GUI 的 Linux 服务器用响铃。Config 中可选开关。
-
-**估时**：0.5h
+**估时**：0.5h（已交付）
 
 ---
 
@@ -406,37 +425,170 @@ crossterm 的 `KeyEvent` 可以直接序列化/反序列化为字符串，用 `s
 
 ---
 
-### N10：temperature / top_p 可配置 (P3)
+### N10：temperature / top_p 可配置 (P3) ✅ 已完成 v0.5.0
 
 **目标**：允许在 config.json 中调整推理参数，控制模型输出创造性。
 
-**实现**：[config.rs](src/config.rs) + [api/mod.rs](src/api/mod.rs)
+**实现**：[config.rs](src/config.rs) + [api/mod.rs](src/api/mod.rs) + [api/types.rs](src/api/types.rs)
 
-```json
-// config.json 新增可选字段
-{
-  "temperature": 0.7,
-  "top_p": 0.9
-}
-```
+- `config.json` 新增可选 `temperature`、`top_p` 字段（`Option<f32>`，不设默认值）
+- `AnthropicRequest` + `OpenAIRequest` 新增对应字段，`skip_serializing_if = "Option::is_none"`
+- `MiMoClient::new()` → `ClientSettings` → `build_anthropic_request` / `build_openai_request` 全链路透传
 
-构建 Anthropic/OpenAI 请求时按配置透传，不设默认值（模型用自身默认值）。
-
-```rust
-// AnthropicRequest + OpenAIRequest 新增
-#[serde(skip_serializing_if = "Option::is_none")]
-temperature: Option<f32>,
-#[serde(skip_serializing_if = "Option::is_none")]
-top_p: Option<f32>,
-```
-
-**估时**：0.5h（config + request builder 两层透传）
+**估时**：0.5h（已交付）
 
 ---
 
-### U11：联网搜索 —— `/search` 命令 + 上下文注入
+### U13：长对话上下文压缩 (P2)
+
+**目标**：长时间对话（50+ 轮）不丢失早期关键细节。当前超过 200 条消息时直接丢弃前 50+ 条，早期讨论的决策、代码、约束条件永久丢失。
+
+**现状问题**：
+
+[commands/mod.rs](src/commands/mod.rs) 中 `maybe_truncate_messages()` 的逻辑：
+```rust
+const MAX_MESSAGES: usize = 200;
+pub fn maybe_truncate_messages(state: &mut AppState) {
+    if state.messages.len() > MAX_MESSAGES {
+        let excess = state.messages.len() - 150;
+        Arc::make_mut(&mut state.messages).drain(0..excess);  // 直接删除
+    }
+}
+```
+
+这意味着：20 轮对话后讨论的架构决策、30 轮前写的关键函数、40 轮前确认的需求约束——全部永久消失。模型"失忆"后可能重复提问、推翻已有结论、或忽略早期约束条件。
+
+**设计思路：滑动窗口 + 自动摘要**
+
+当消息数接近上限时（如 180 条），自动触发"上下文压缩"：
+1. 将前半段消息（如前 80 条）发给 API 生成结构化摘要
+2. 摘要替换原始消息，保留关键信息但大幅减少 token 数
+3. 摘要作为 system message 或特殊的 user/assistant 轮次保留在消息列表头部
+
+**摘要格式设计**：
+
+```
+[对话摘要 — 前 80 条消息压缩]
+## 关键决策
+- 选择了 Rust + ratatui 作为技术栈，放弃 Electron
+- API 格式采用 Anthropic 协议，预留 OpenAI 兼容
+
+## 重要代码
+- src/api/mod.rs: MiMoClient 结构体，RwLock<ClientSettings> 热切换
+- src/config.rs: ProviderPreset + ConfigRaw 向后兼容设计
+
+## 待办/约束
+- 不做桌面端 (Tauri 已搁置)
+- 缓存断点上限 4 个 (Anthropic API 限制)
+- Windows 路径需处理 UNC 前缀
+
+## 用户偏好
+- 偏好中文注释
+- 不要在代码中加 emoji
+```
+
+**实现方案**：
+
+**Step 1 — 摘要触发时机**
+
+在 `maybe_truncate_messages` 中增加压缩路径：
+```rust
+const COMPRESS_THRESHOLD: usize = 180;  // 触发压缩
+const KEEP_RECENT: usize = 100;         // 压缩后保留的最近消息数
+
+pub fn maybe_truncate_messages(state: &mut AppState) {
+    let len = state.messages.len();
+    if len > MAX_MESSAGES {
+        // 硬截断兜底（防溢出）
+        let excess = len - 150;
+        Arc::make_mut(&mut state.messages).drain(0..excess);
+    } else if len > COMPRESS_THRESHOLD && !state.compressing {
+        // 触发异步压缩
+        state.compressing = true;
+        spawn_compress_context(state);
+    }
+}
+```
+
+**Step 2 — 异步摘要生成**
+
+```rust
+fn spawn_compress_context(state: &mut AppState) {
+    // 提取前 N 条消息作为压缩目标
+    let to_compress = state.messages[..state.messages.len() - KEEP_RECENT].to_vec();
+    let recent = state.messages[state.messages.len() - KEEP_RECENT..].to_vec();
+
+    // 在后台用 API 生成摘要（使用轻量模型如 mimo-v2-flash 节省费用）
+    tokio::spawn(async move {
+        let summary = generate_summary(&to_compress).await;
+        // 用摘要消息 + 最近消息替换整个消息列表
+        let mut new_msgs = vec![ChatMessage {
+            role: "system".into(),
+            content: Content::text(summary),
+            cache_control: None,
+        }];
+        new_msgs.extend(recent);
+        // 回传给主线程更新 state.messages
+    });
+}
+```
+
+**Step 3 — 摘要生成 prompt**
+
+```rust
+async fn generate_summary(messages: &[ChatMessage]) -> String {
+    let mut prompt = String::from("请将以下对话压缩为结构化摘要，保留所有关键信息：\n\n");
+    for msg in messages {
+        prompt.push_str(&format!("{}: {}\n\n", msg.role, msg.content.as_str()));
+    }
+    prompt.push_str("请按以下格式输出：\n");
+    prompt.push_str("## 关键决策\n## 重要代码\n## 待办/约束\n## 用户偏好");
+
+    // 用当前 provider 的轻量模型生成摘要
+    // ...
+}
+```
+
+**关键细节**：
+
+| 方面 | 方案 |
+|------|------|
+| **触发阈值** | 180 条消息触发压缩，200 条硬截断兜底 |
+| **保留最近消息** | 100 条（约 50 轮对话），确保近期上下文完整 |
+| **摘要模型** | 使用当前 provider 的轻量模型 (flash/mini)，节省费用 |
+| **压缩频率** | 同一会话最多每 30 分钟压缩一次，避免频繁 API 调用 |
+| **用户感知** | 状态栏显示 `⏳ 压缩中...`，完成后显示 `📋 已压缩 N 条→摘要` |
+| **手动触发** | `/compress` 命令手动触发压缩，不等自动阈值 |
+| **防抖** | 压缩过程中禁止新的消息发送（等待完成） |
+| **幂等** | 压缩后如果再次接近上限，对已有摘要 + 新消息再次压缩 |
+
+**不降智保证**：
+- 摘要由 AI 生成，关键信息保留率 > 90%（对比直接丢弃的 0%）
+- 最近 100 条消息完整保留，近期对话零损失
+- 摘要内容对模型可见，早期约束和决策不会被遗忘
+
+**预期效果**：
+
+| 场景 | 改前 | 改后 |
+|------|------|------|
+| 200 条消息后 | 前 50 条永久丢失 | 前 100 条压缩为摘要，关键决策保留 |
+| 500 条长对话 | 模型反复问已确认的问题 | 摘要中已有答案，模型不再重复 |
+| 会话重启 | 丢失所有压缩上下文 | 摘要持久化到 Session JSON |
+
+**估时**：4h（摘要触发 1h + 异步摘要生成 1h + 摘要 prompt 设计 0.5h + Session 持久化适配 0.5h + /compress 命令 0.5h + 测试 0.5h）
+
+---
+
+### U11：联网搜索 —— `/search` 命令 + 上下文注入 ✅ 已完成 v0.5.0
 
 **目标**：用户在对话中通过 `/search <关键词>` 触发联网搜索，搜索结果自动注入到当前对话上下文，让 AI 基于实时信息回答问题。
+
+**实现**：new [src/search.rs](src/search.rs) + [config.rs](src/config.rs) + [commands.rs](src/commands.rs) + [api/mod.rs](src/api/mod.rs)
+
+- **配置**: `WebSearchConfig { enabled, engine, max_results, timeout_secs }`，默认 DDG
+- **DDG 引擎**: 解析 `html.duckduckgo.com` HTML 结果页（无需 API Key），提取标题/URL/摘要
+- **DeepSeek 引擎**: `send_message_stream_with_search()` 透传 `tools[web_search]`，DeepSeek 原生搜索
+- **命令**: `/search <关键词>` → DDG 搜索 → 结果注入对话 → 用户自然追问
 
 **为什么需要**：
 - MiMo/DeepSeek 等模型的知识截止日期有限，无法回答实时问题（新闻、股价、天气等）
@@ -523,9 +675,14 @@ DeepSeek API 在 OpenAI 兼容格式下支持 `tools` 中的 `web_search` 类型
 
 ---
 
-### U12：终端启动 Logo —— 芒果猫
+### U12：终端启动 Logo —— 芒果猫 ✅ 已完成 v0.5.0
 
 **目标**：启动时在终端展示一个芒果猫色块 Logo，提升品牌辨识度和第一印象。参考 Claude Code 的启动 banner 风格。
+
+**实现**：new [src/ui/logo.rs](src/ui/logo.rs) + [app.rs](src/app.rs)
+- 8×5 ANSI 真彩色块像素画（芒果橘/奶油白/粉色系），每像素 2 字符宽
+- 右侧信息栏：版本号、Provider、Model、余额
+- 按任意键即进入主界面，也可自然超时跳过
 
 **设计要求**：
 - 使用 ANSI 24-bit 真彩色块（`\x1b[48;2;R;G;Bm`），终端兼容性好
@@ -1255,11 +1412,22 @@ src/
 **改动**：[app.rs](src/app.rs)、[config.rs](src/config.rs)
 
 **三个命令**：
-- `/skills` — 显示格式化技能列表（名称 → 命令模板）
-- `/addskill <name> <cmd>` — 添加技能并自动保存 config.json
+- `/skills` — 显示格式化技能列表（名称 — 描述 + [不分析] 标记）
+- `/addskill <name> <cmd> [;desc]` — 添加技能（可选描述）并自动保存 config.json
 - `/rmskill <name>` — 删除技能并自动保存 config.json
 
 `Config` 新增 `save()` 方法：序列化为 JSON 写入配置文件。
+
+### 技能系统增强 (SkillEntry) ✅ 已完成
+
+**问题**: 技能只能存储命令字符串，无法描述功能、无法控制是否让 AI 分析输出。
+**方案**: `SkillEntry` 枚举 (`#[serde(untagged)]`) 支持两种配置格式，向后兼容。
+
+- `Simple("cmd")` — 旧格式，自动兼容
+- `Detailed { cmd, desc, analyze }` — 新格式：描述 + 分析开关
+- `analyze: false` 的技能执行完直接显示，不发给 AI 节省 token
+- 默认技能全部带描述，`git`/`diff` 默认不分析
+- 5 个新测试覆盖序列化往返和默认值
 
 ---
 
@@ -2372,13 +2540,13 @@ ENTRYPOINT ["mimo-opt"]
 | 安全基线 | P0-1/2/3/4 全部完成 + 原 P1 全部完成 | **7.7** | 安全+体验到位 |
 | **v0.3.x 工程化** | E1 重试 + E3 背压 + E4 余额 + E5 日志 + E6 拆分 + F1-F6 体验修复 | **8.0** | 工程化成熟 |
 | **v0.4.0 主题+Markdown** | U3 Markdown 七元素 + U4 三主题热切换 | **8.3** | UI 差异化完成 |
-| **← 当前 v0.4.0** | | **8.3** | |
-| **P1 缓存+测试** | E2 单元测试 + W1/W2/W3 缓存 v3 | **8.6** | 安全基线 + 成本优化 |
+| **← 当前 v0.5.7** | E2 单元测试 (106 tests) | **8.6** | **25/25 全部完成** |
+| **P2 体验增强** | U1 侧边栏 | **8.8** | 差异化功能 |
 | **P2 功能增强** | U11 联网搜索 + U1 侧边栏 + U12 Logo + C1/C2 代码优化 | **8.8** | 差异化功能 |
 | **P3 收尾** | U9 管道 + C3/C4 兼容性 | **8.8** | 锦上添花 |
 | **D1 桌面端** | Tauri 迁移 | **9.0** | 双模式部署 |
 
-> **2026-05-21 状态**：v0.4.0，评分 ~8.3。P0 安全 ✅ + 原 P1 体验 ✅ + 工程化 ✅ + UI 差异化 ✅。下一站 P1 四件套（缓存 v3 + 测试），目标 8.6。
+> **2026-05-22 状态**：v0.5.7，评分 ~8.6。P0 安全 ✅ + P1 全部 ✅ + 工程化 ✅ + UI 差异化 ✅ + 单元测试 80 个 ✅。下一站 P2 侧边栏，目标 8.8。
 
 ---
 

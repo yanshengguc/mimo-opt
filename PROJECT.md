@@ -29,7 +29,7 @@
 | 异步 | tokio 1 (full) |
 | 序列化 | serde + serde_json |
 | 语法高亮 | syntect 5 |
-| 剪贴板 | cli-clipboard 0.4 |
+| 剪贴板 | arboard 3 |
 | 其他 | scopeguard, unicode-width, futures-util, dirs, anyhow |
 
 ---
@@ -89,6 +89,18 @@
 | **Markdown** | 粗体/斜体/行内代码 | ✅ v0.3.9 |
 | **Markdown 完善** | 列表/链接/分隔线 | ✅ v0.4.0 |
 | **主题** | 3 套主题热切换 + /theme | ✅ v0.4.0 |
+| **缓存 v3** | 日期前置+System Prompt分割+自适应断点 | ✅ v0.5.0 |
+| **代理** | HTTP/SOCKS5 代理支持 | ✅ v0.5.0 |
+| **联网搜索** | /search DDG+DeepSeek 双引擎 | ✅ v0.5.0 |
+| **费用预估** | 发送前实时 token/费用预估 | ✅ v0.5.0 |
+| **撤回** | Ctrl+Z 撤回最后对话轮次 | ✅ v0.5.0 |
+| **输入框** | 自适应多行扩展 (3~半屏) | ✅ v0.5.0 |
+| **异步加载** | syntect 异步预加载不阻塞首屏 | ✅ v0.5.0 |
+| **diff 预览** | /edit 确认弹窗红删绿增 | ✅ v0.5.0 |
+| **通知** | 回复完成终端响铃 | ✅ v0.5.0 |
+| **Logo** | 芒果猫 ANSI 色块启动动画 | ✅ v0.5.0 |
+| **剪贴板** | cli-clipboard → arboard 跨平台 | ✅ v0.5.0 |
+| **多模型支持** | 每 Provider 多个模型 + 独立定价 + 补全提示 | ✅ v0.5.2 |
 
 ### 待完成
 
@@ -105,8 +117,8 @@
 
 ## 项目快照
 
-- **当前行数**：~3850 行 Rust（11 个源文件）
-- **依赖**：tokio, reqwest, serde, serde_json, ratatui, crossterm, futures-util, dirs, anyhow, scopeguard, unicode-width, syntect, cli-clipboard, log, env_logger
+- **当前行数**：~3700 行 Rust（16 个源文件）
+- **依赖**：tokio, reqwest, serde, serde_json, ratatui, crossterm, futures-util, dirs, anyhow, scopeguard, unicode-width, syntect, arboard, log, env_logger
 - **编译状态**：通过，0 warnings，clippy clean
 - **API 端点**：MiMo Token Plan / DeepSeek / OpenAI / 自定义（多 Provider 预设）
 - **默认模型**：mimo-v2-flash

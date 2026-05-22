@@ -25,7 +25,7 @@ pub struct ThemeColors {
 }
 
 pub const TOKYO_NIGHT: ThemeColors = ThemeColors {
-    border_dim: Color::Rgb(86, 95, 137),       // #565f89
+    border_dim: Color::Rgb(86, 95, 137),        // #565f89
     title: Color::Rgb(122, 162, 247),           // #7aa2f7
     model_tag: Color::Rgb(125, 207, 255),       // #7dcfff
     user_msg: Color::Rgb(192, 202, 245),        // #c0caf5
@@ -47,47 +47,47 @@ pub const TOKYO_NIGHT: ThemeColors = ThemeColors {
 };
 
 pub const NORD: ThemeColors = ThemeColors {
-    border_dim: Color::Rgb(76, 86, 106),        // #4c566a
-    title: Color::Rgb(136, 192, 208),           // #88c0d0
-    model_tag: Color::Rgb(143, 188, 187),       // #8fbcbb
-    user_msg: Color::Rgb(236, 239, 244),        // #eceff4
-    mimo_msg: Color::Rgb(216, 222, 233),        // #d8dee9
-    code_border: Color::Rgb(67, 76, 94),        // #434c5e
-    code_bg: Color::Rgb(46, 52, 64),            // #2e3440
-    status_data: Color::Rgb(136, 192, 208),     // #88c0d0
-    status_label: Color::Rgb(76, 86, 106),      // #4c566a
-    input_prompt: Color::Rgb(180, 142, 173),    // #b48ead
-    spinner: Color::Rgb(136, 192, 208),         // #88c0d0
-    error: Color::Rgb(191, 97, 106),            // #bf616a
-    success: Color::Rgb(163, 190, 140),         // #a3be8c
-    separator: Color::Rgb(76, 86, 106),         // #4c566a
-    blockquote_border: Color::Rgb(94, 129, 172),// #5e81ac
-    inline_code: Color::Rgb(59, 66, 82),        // #3b4252
-    link_color: Color::Rgb(143, 188, 187),      // #8fbcbb
-    list_bullet: Color::Rgb(76, 86, 106),       // #4c566a
-    hr_color: Color::Rgb(76, 86, 106),          // #4c566a
+    border_dim: Color::Rgb(76, 86, 106),         // #4c566a
+    title: Color::Rgb(136, 192, 208),            // #88c0d0
+    model_tag: Color::Rgb(143, 188, 187),        // #8fbcbb
+    user_msg: Color::Rgb(236, 239, 244),         // #eceff4
+    mimo_msg: Color::Rgb(216, 222, 233),         // #d8dee9
+    code_border: Color::Rgb(67, 76, 94),         // #434c5e
+    code_bg: Color::Rgb(46, 52, 64),             // #2e3440
+    status_data: Color::Rgb(136, 192, 208),      // #88c0d0
+    status_label: Color::Rgb(76, 86, 106),       // #4c566a
+    input_prompt: Color::Rgb(180, 142, 173),     // #b48ead
+    spinner: Color::Rgb(136, 192, 208),          // #88c0d0
+    error: Color::Rgb(191, 97, 106),             // #bf616a
+    success: Color::Rgb(163, 190, 140),          // #a3be8c
+    separator: Color::Rgb(76, 86, 106),          // #4c566a
+    blockquote_border: Color::Rgb(94, 129, 172), // #5e81ac
+    inline_code: Color::Rgb(59, 66, 82),         // #3b4252
+    link_color: Color::Rgb(143, 188, 187),       // #8fbcbb
+    list_bullet: Color::Rgb(76, 86, 106),        // #4c566a
+    hr_color: Color::Rgb(76, 86, 106),           // #4c566a
 };
 
 pub const CATPPUCCIN: ThemeColors = ThemeColors {
-    border_dim: Color::Rgb(88, 91, 112),        // #585b70
-    title: Color::Rgb(137, 180, 250),           // #89b4fa
-    model_tag: Color::Rgb(148, 226, 213),       // #94e2d5
-    user_msg: Color::Rgb(205, 214, 244),        // #cdd6f4
-    mimo_msg: Color::Rgb(186, 194, 222),        // #bac2de
-    code_border: Color::Rgb(69, 71, 90),        // #45475a
-    code_bg: Color::Rgb(30, 30, 46),            // #1e1e2e
-    status_data: Color::Rgb(148, 226, 213),     // #94e2d5
-    status_label: Color::Rgb(88, 91, 112),      // #585b70
-    input_prompt: Color::Rgb(203, 166, 247),    // #cba6f7
-    spinner: Color::Rgb(148, 226, 213),         // #94e2d5
-    error: Color::Rgb(243, 139, 168),           // #f38ba8
-    success: Color::Rgb(166, 227, 161),         // #a6e3a1
-    separator: Color::Rgb(69, 71, 90),          // #45475a
-    blockquote_border: Color::Rgb(137, 180, 250),// #89b4fa
-    inline_code: Color::Rgb(49, 50, 68),        // #313244
-    link_color: Color::Rgb(148, 226, 213),      // #94e2d5
-    list_bullet: Color::Rgb(88, 91, 112),       // #585b70
-    hr_color: Color::Rgb(69, 71, 90),           // #45475a
+    border_dim: Color::Rgb(88, 91, 112),          // #585b70
+    title: Color::Rgb(137, 180, 250),             // #89b4fa
+    model_tag: Color::Rgb(148, 226, 213),         // #94e2d5
+    user_msg: Color::Rgb(205, 214, 244),          // #cdd6f4
+    mimo_msg: Color::Rgb(186, 194, 222),          // #bac2de
+    code_border: Color::Rgb(69, 71, 90),          // #45475a
+    code_bg: Color::Rgb(30, 30, 46),              // #1e1e2e
+    status_data: Color::Rgb(148, 226, 213),       // #94e2d5
+    status_label: Color::Rgb(88, 91, 112),        // #585b70
+    input_prompt: Color::Rgb(203, 166, 247),      // #cba6f7
+    spinner: Color::Rgb(148, 226, 213),           // #94e2d5
+    error: Color::Rgb(243, 139, 168),             // #f38ba8
+    success: Color::Rgb(166, 227, 161),           // #a6e3a1
+    separator: Color::Rgb(69, 71, 90),            // #45475a
+    blockquote_border: Color::Rgb(137, 180, 250), // #89b4fa
+    inline_code: Color::Rgb(49, 50, 68),          // #313244
+    link_color: Color::Rgb(148, 226, 213),        // #94e2d5
+    list_bullet: Color::Rgb(88, 91, 112),         // #585b70
+    hr_color: Color::Rgb(69, 71, 90),             // #45475a
 };
 
 /// 根据名称获取主题色板（默认 Tokyo Night）
@@ -102,4 +102,71 @@ pub fn get_theme(name: &str) -> &'static ThemeColors {
 /// 所有可用主题名称
 pub fn theme_names() -> &'static [&'static str] {
     &["tokyo-night", "nord", "catppuccin"]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_theme_tokyo_night_default() {
+        let t = get_theme("tokyo-night");
+        assert_eq!(t.title, Color::Rgb(122, 162, 247));
+    }
+
+    #[test]
+    fn get_theme_unknown_falls_back() {
+        let t = get_theme("nonexistent");
+        // Should fall back to Tokyo Night
+        assert_eq!(t.title, Color::Rgb(122, 162, 247));
+    }
+
+    #[test]
+    fn get_theme_nord() {
+        let t = get_theme("nord");
+        assert_eq!(t.title, Color::Rgb(136, 192, 208));
+    }
+
+    #[test]
+    fn get_theme_catppuccin() {
+        let t = get_theme("catppuccin");
+        assert_eq!(t.title, Color::Rgb(137, 180, 250));
+    }
+
+    #[test]
+    fn theme_names_contains_all() {
+        let names = theme_names();
+        assert_eq!(names.len(), 3);
+        assert!(names.contains(&"tokyo-night"));
+        assert!(names.contains(&"nord"));
+        assert!(names.contains(&"catppuccin"));
+    }
+
+    #[test]
+    fn all_themes_have_consistent_fields() {
+        // Ensure all themes define the same color fields (compile-time check)
+        let themes: [&ThemeColors; 3] = [&TOKYO_NIGHT, &NORD, &CATPPUCCIN];
+        for t in &themes {
+            // Just access fields to ensure they exist and are valid Color types
+            let _ = t.border_dim;
+            let _ = t.title;
+            let _ = t.model_tag;
+            let _ = t.user_msg;
+            let _ = t.mimo_msg;
+            let _ = t.code_border;
+            let _ = t.code_bg;
+            let _ = t.status_data;
+            let _ = t.status_label;
+            let _ = t.input_prompt;
+            let _ = t.spinner;
+            let _ = t.error;
+            let _ = t.success;
+            let _ = t.separator;
+            let _ = t.blockquote_border;
+            let _ = t.inline_code;
+            let _ = t.link_color;
+            let _ = t.list_bullet;
+            let _ = t.hr_color;
+        }
+    }
 }

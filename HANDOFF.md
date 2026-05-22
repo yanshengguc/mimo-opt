@@ -10,7 +10,7 @@
 
 **一句话：** 类似 ChatGPT/Claude 的终端版，但接的是小米 MiMo API，Tokyo Night 配色，简洁不简陋。
 
-**当前状态：** v0.4.0，P0/P1 全部到位，P2 工程化大部分完成，P3 Markdown 全覆盖 + 主题热切换已完成，实测 6 项体验问题全部修复，clippy 0 warnings。
+**当前状态：** v0.5.2，多 Provider 多模型支持 + 缓存 v3(85-92%命中率) + 联网搜索 + 15 项 UX 优化 + 撤回/费用预估/代理/Logo/通知/diff预览 + clippy 0 warnings。
 
 ---
 
@@ -24,7 +24,7 @@
 | 异步 | tokio 1 (full) | 异步运行时 |
 | 序列化 | serde + serde_json | JSON 处理 |
 | 语法高亮 | syntect 5 (default-fancy) | 代码块着色 |
-| 剪贴板 | cli-clipboard 0.4 | 复制代码块 |
+| 剪贴板 | arboard 3 | 复制代码块 (X11/Wayland/Windows/macOS) |
 | 日志 | log 0.4 + env_logger 0.11 | 结构化日志（RUST_LOG=mimo_opt=debug） |
 | 其他 | scopeguard, unicode-width, futures-util, dirs, anyhow | |
 
@@ -37,29 +37,35 @@ Rust 路径：`~/.cargo/bin/`（可能不在 PATH 中，需 `export PATH="$PATH:
 
 ```
 C:/test/mimo-opt/
-├── Cargo.toml                          # 依赖配置
+├── Cargo.toml                          # 依赖配置 (v0.5.2)
 ├── src/
 │   ├── main.rs                         # 入口：加载配置，检查 api_key，启动 app
-│   ├── app.rs                          # 核心：AppState + 事件循环 + 键盘处理 + 异步任务调度（~1500 行）
-│   ├── config.rs                       # 配置：读写 ~/.config/mimo-opt/config.json + save()
+│   ├── app.rs                          # 核心：AppState + 事件循环 + 键盘处理 + 异步任务调度（~780 行）
+│   ├── commands.rs                     # 命令系统：/model /provider /read /write /edit + 技能执行 + 流式请求
+│   ├── config.rs                       # 配置：ProviderPreset + ModelInfo + PROVIDERS(3xProvider=9xModel) + 定价回退
+│   ├── prompt.rs                       # System prompt：构建/缓存断点/日期注入/自适应布局
+│   ├── search.rs                       # 联网搜索：DDG HTML 解析 + 结果格式化
+│   ├── scanner.rs                      # 项目文件树扫描
 │   ├── file_ops.rs                     # 文件操作：read/write/edit，路径沙箱 + 自动备份
 │   ├── session.rs                      # 会话持久化：Session 结构 + JSON 存储
+│   ├── util.rs                         # 工具：时间戳/工作目录/token估算/费用预估
 │   ├── api/
-│   │   ├── mod.rs                      # MiMoClient：check_api() 探测 + send_message_stream() 流式对话
-│   │   └── types.rs                    # 类型：ChatMessage, Content enum, ChatRequest, StreamEvent, StreamResult
+│   │   ├── mod.rs                      # MiMoClient：send_message_stream() + 重试 + 余额 + 联网搜索
+│   │   └── types.rs                    # 类型：Content enum, Anthropic/OpenAI 请求/响应/流式
 │   └── ui/
 │       ├── mod.rs                      # UI 模块入口
-│       ├── theme.rs                    # Tokyo Night 配色常量
-│       └── draw.rs                     # 界面绘制：标题栏 / 对话区 / 输入框 / 状态栏 / 确认弹窗 / 搜索栏
-├── OPTIMIZATION.md                     # 完整优化路线图（15 项已完成 + 1 项待做）
-├── CHANGELOG.md                        # 详细更新日志（Phase 1-10）
+│       ├── theme.rs                    # 3 套主题（tokyo-night/nord/catppuccin）热切换
+│       ├── logo.rs                     # 启动 Logo：芒果猫 8×5 ANSI 色块
+│       └── draw.rs                     # 界面绘制：标题栏/对话区/输入框(自适应)/状态栏/确认弹窗/搜索栏
+├── OPTIMIZATION.md                     # 完整优化路线图（16/23 完成）
+├── CHANGELOG.md                        # 详细更新日志（v0.1.0 → v0.5.2）
 ├── PROJECT.md                          # 项目需求文档
 ├── UI_DESIGN.md                        # 界面视觉设计稿
 ├── README.md                           # GitHub 介绍
 └── HANDOFF.md                          # 本文档
 ```
 
-**关键文件行数**：app.rs ~1880 | draw.rs ~700 | api/mod.rs ~500 | api/types.rs ~143 | config.rs ~224 | file_ops.rs ~156 | session.rs ~138
+**关键文件行数**：app.rs ~780 | commands.rs ~1070 | draw.rs ~880 | api/mod.rs ~640 | config.rs ~300
 
 ---
 
@@ -115,18 +121,29 @@ app.rs 从 channel 收到 StreamResult → 更新 AppState → ui/draw.rs 渲染
 {"type": "message_stop"}
 ```
 
-### 可用模型
-| 模型 | 说明 |
-|------|------|
-| mimo-v2-flash | 极速轻量，日常编码（默认） |
-| mimo-v2.5 | 全模态 |
-| mimo-v2.5-pro | 旗舰，1M 上下文 |
-| mimo-v2-omni | 图像/视频/音频 |
-| mimo-v2-5-tts | 语音合成 |
+### 多 Provider / 多模型
 
-### 费率（粗略，以官方为准）
-- Input: ¥2/百万 tokens
-- Output: ¥8/百万 tokens
+模型定义在 `config.rs` 的 `PROVIDERS` 常量中，每个 Provider 持有 `models: &[ModelInfo]`，每个模型含 `name` + `desc` + 独立定价。用户通过 `/model` 命令浏览和切换。
+
+**当前模型清单（v0.5.2）**：
+
+| Provider | 模型 | 描述 | 输入价 ¥/Mtok | 输出价 ¥/Mtok |
+|----------|------|------|----------------|----------------|
+| MiMo | mimo-v2-flash | 轻量快速，日常对话 | 2.0 | 8.0 |
+| MiMo | mimo-v2-pro | 专业推理，复杂任务 | 6.0 | 24.0 |
+| DeepSeek | deepseek-chat | V3 标准对话，性价比高 | 1.0 | 2.0 |
+| DeepSeek | deepseek-reasoner | R1 深度推理，数学/代码/逻辑 | 4.0 | 16.0 |
+| DeepSeek | deepseek-v4-flash | V4 轻量快速，日常高频 | 1.5 | 3.0 |
+| DeepSeek | deepseek-v4-pro | V4 旗舰，全能最强 | 6.0 | 24.0 |
+| OpenAI | gpt-4o-mini | 轻量快速，日常使用 | 1.25 | 5.0 |
+| OpenAI | gpt-4o | 全能旗舰，多模态 | 2.5 | 10.0 |
+| OpenAI | gpt-4-turbo | 高性能推理 | 10.0 | 30.0 |
+
+**定价回退链**：模型精确匹配 → Provider 默认模型 → 硬编码兜底(2.0/8.0)
+
+### 添加新模型
+
+在 `PROVIDERS` 对应 Provider 的 `models` 数组中添加 `ModelInfo` 条目即可。`/model` 命令自动列出，`/model <name>` 自动有补全提示。无需改其他文件。
 
 ---
 
@@ -136,10 +153,23 @@ app.rs 从 channel 收到 StreamResult → 更新 AppState → ui/draw.rs 渲染
 
 ```json
 {
-  "api_key": "tp-xxx",
-  "base_url": "https://token-plan-sgp.xiaomimimo.com/anthropic",
-  "model": "mimo-v2-flash",
-  "auth_type": "anthropic",
+  "provider": "deepseek",
+  "api_key": "sk-your-key",
+  "base_url": "https://api.deepseek.com",
+  "model": "deepseek-chat",
+  "auth_type": "bearer",
+  "api_format": "openai",
+  "max_tokens": 4096,
+  "theme": "tokyo-night",
+  "proxy_url": null,
+  "temperature": null,
+  "top_p": null,
+  "web_search": {
+    "enabled": true,
+    "engine": "ddg",
+    "max_results": 5,
+    "timeout_secs": 10
+  },
   "skills": {
     "lint": "cargo clippy 2>&1",
     "test": "cargo test 2>&1",
@@ -149,6 +179,13 @@ app.rs 从 channel 收到 StreamResult → 更新 AppState → ui/draw.rs 渲染
   }
 }
 ```
+
+**字段说明**：
+- `provider`: 必填，"mimo"|"deepseek"|"openai"|"custom"。决定 Provider 预设（base_url/model/auth/定价默认值）
+- `model`: 可选，覆盖 Provider 默认模型。`/model` 列出当前 Provider 已知模型
+- `proxy_url`: 可选，HTTP/SOCKS5 代理（如 `"http://127.0.0.1:7890"`）
+- `temperature`/`top_p`: 可选，推理参数，不设则用 API 默认值
+- `web_search`: 联网搜索配置，`/search` 命令使用
 
 会话存储于：`~/.config/mimo-opt/sessions/{timestamp}.json`
 文件备份于：`.mimo-opt/backups/{filename}.{unix_ts}.bak`
@@ -283,6 +320,23 @@ app.rs 从 channel 收到 StreamResult → 更新 AppState → ui/draw.rs 渲染
 - [x] 内联 Markdown — 粗体/斜体/行内代码（v0.3.9）
 - [x] Markdown 渲染完善 — 无序/有序列表 + `[链接](url)` + `---` 分隔线（v0.4.0）
 - [x] 主题热切换 — 3 套内置主题 + `/theme` 命令（v0.4.0）
+- [x] 缓存 v3 — 日期前置 + System Prompt 拆分 + 自适应断点，命中率 85-92%（v0.5.0）
+- [x] HTTP/SOCKS5 代理 — `proxy_url` 配置项（v0.5.0）
+- [x] 联网搜索 — `/search` 命令，DDG + DeepSeek 双引擎（v0.5.0）
+- [x] 发送前费用预估 — 输入框右侧实时显示 `~¥ tok`（v0.5.0）
+- [x] Ctrl+Z 撤回 — 移除最后对话轮次，恢复输入（v0.5.0）
+- [x] 输入框自适应扩展 — 3~半屏动态高度（v0.5.0）
+- [x] syntect 异步加载 — 首屏不阻塞（v0.5.0）
+- [x] /edit diff 预览 — 确认弹窗红删绿增（v0.5.0）
+- [x] 回复完成通知 — 终端响铃 `\x07`（v0.5.0）
+- [x] temperature / top_p 可配置（v0.5.0）
+- [x] cli-clipboard → arboard，Wayland 原生支持（v0.5.0）
+- [x] 芒果猫启动 Logo — 8×5 ANSI 色块 + 版本/Provider/余额（v0.5.0）
+- [x] 代码去重 — draw.rs 内联解析合并为 `parse_inline_spans()`（v0.5.1）
+- [x] DDG 搜索结果注入 AI 分析 — 不再仅展示原始结果（v0.5.1）
+- [x] 多模型支持 — 每 Provider 多模型 + 独立定价 + /model 列出/切换（v0.5.2）
+- [x] 模型中文描述 — `desc` 字段，`/model` 列出时一目了然（v0.5.2）
+- [x] 二级补全提示 — `/model <partial>` + `/provider <partial>` 自动补全（v0.5.2）
 
 ---
 
@@ -297,6 +351,8 @@ app.rs 从 channel 收到 StreamResult → 更新 AppState → ui/draw.rs 渲染
 | `F2` | 切换会话 |
 | `Ctrl+F` | 搜索消息 |
 | `Ctrl+Y` | 复制最后一个代码块到剪贴板 |
+| `Ctrl+Z` | 撤回最后一轮对话 |
+| `Ctrl+V` | 粘贴剪贴板 |
 | `↑/↓` | 浏览输入历史 |
 | `PageUp/PageDown` | 翻页浏览对话 |
 | `Ctrl+Home` | 回到对话底部 |
@@ -309,10 +365,16 @@ app.rs 从 channel 收到 StreamResult → 更新 AppState → ui/draw.rs 渲染
 
 | 命令 | 功能 | 需确认 |
 |------|------|--------|
+| `/model [name]` | 列出可用模型 / 切换模型 | 否 |
+| `/provider <name>` | 切换 API 提供商 | 否 |
+| `/theme [name]` | 列出主题 / 切换主题 | 否 |
+| `/search <kw>` | 联网搜索（DDG/DeepSeek） | 否 |
 | `/read <path>[:range]` | 读取文件注入上下文 | 否 |
 | `/write <path>` | 提取代码块写入文件 | 是（文件已存在时） |
 | `/edit <path> <old> <new>` | 精确字符串替换 | 是 |
+| `/export [path]` | 导出会话为 Markdown | 否 |
 | `/clear` | 清空当前对话 | 是 |
+| `/errors` | 查看错误历史 | 否 |
 | `/skills` | 列出全部技能 | 否 |
 | `/addskill <name> <cmd>` | 添加技能 | 否 |
 | `/rmskill <name>` | 删除技能 | 否 |
@@ -323,20 +385,11 @@ app.rs 从 channel 收到 StreamResult → 更新 AppState → ui/draw.rs 渲染
 
 ## 11. 关键实现细节
 
-### 缓存策略
-```rust
-fn apply_cache_breakpoints(messages: &mut [ChatMessage]) {
-    // messages[0] 始终设断点（system prompt + 首条消息锚点）
-    messages[0].cache_control = Some(CacheControl { cache_type: "ephemeral".to_string() });
-    // 每 6 条消息追加一个断点（3 轮对话一层）
-    for i in (3..n).step_by(6) {
-        messages[i].cache_control = Some(CacheControl { cache_type: "ephemeral".to_string() });
-    }
-}
-```
-- System prompt 不含日期，跨天存活
-- 日期注入到首条 user message（`messages.len() == 1` 时）
-- 预期命中率：5 轮对话后稳定 70%+
+### 缓存策略 (v3，prompt.rs)
+- **W1 日期前置**: `inject_date_preamble()` 插入不含 cache_control 的日期消息，不污染 messages[0] 缓存
+- **W2 System Prompt 拆分**: `build_system_content_split()` → stable block(缓存) + dynamic block(不缓存)
+- **W3 自适应断点**: `apply_cache_breakpoints()` 按对话长度 4 档分配断点（1-3/4-8/9-16/17+），优先覆盖最近一轮
+- 预期命中率：85-92% (vs v2 的 70-85%)
 
 ### Content enum
 ```rust
@@ -391,13 +444,22 @@ notepad "%APPDATA%\mimo-opt\config.json"
 
 ## 13. 待完成方向
 
-**P2 工程化（剩余）**:
-- [ ] 单元测试覆盖（优先 file_ops / config / prompt / cost / session）
-- [ ] app.rs 模块拆分（~1900 行 → 多文件）
-- [ ] GLM / 通义千问 / Kimi 等平台预设完善
+**P1 安全**:
+- [ ] E2: 单元测试覆盖（优先 file_ops / config / prompt / cost / session）
 
-**P3 锦上添花**:
+**P2 体验**:
 - [ ] U1: 会话侧边栏（Ctrl+B）
+- [ ] C1: 消息列表 clone 优化（`Arc<Vec<ChatMessage>>`）
+- [ ] C2: commands.rs / draw.rs 模块拆分
+
+**P3 补充**:
+- [ ] U9: Shell 管道集成（`echo "..." | mimo-opt --prompt`）
+- [ ] N9: 快捷键可配置（keybindings.json）
+- [ ] D1: 桌面端 Tauri 迁移
+
+**待定**:
+- [ ] GLM / 通义千问 / Kimi 等平台预设完善
+- [ ] MCP 支持
 - [x] U3: Markdown 渲染增强 — 粗体/斜体/行内代码 v0.3.9 + 列表/链接/分隔线 v0.4.0
 - [x] U4: 主题热切换 — Tokyo Night/Nord/Catppuccin + /theme 命令 v0.4.0
 - [x] U8: 引用块视觉支持（blockquote）— v0.3.9

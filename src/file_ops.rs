@@ -59,19 +59,14 @@ pub fn read_file(path: &Path, line_range: Option<(usize, usize)>) -> Result<Stri
             if s >= e {
                 return Err("行范围无效".into());
             }
-            let selected = &lines[s..e];
-            let mut result = String::new();
-            for (i, line) in selected.iter().enumerate() {
-                result.push_str(&format!("{:>4} | {}\n", start + i, line));
-            }
-            Ok(result)
+            Ok(format_lines_with_numbers(
+                lines[s..e].iter().copied(),
+                start,
+            ))
         }
         None => {
             let total = content.lines().count();
-            let mut result = String::new();
-            for (i, line) in content.lines().enumerate() {
-                result.push_str(&format!("{:>4} | {}\n", i + 1, line));
-            }
+            let mut result = format_lines_with_numbers(content.lines(), 1);
             result.push_str(&format!("\n[{} lines]", total));
             Ok(result)
         }
@@ -126,6 +121,15 @@ fn backup_file(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Build line-numbered output from lines iterator
+fn format_lines_with_numbers<'a, I: Iterator<Item = &'a str>>(lines: I, start: usize) -> String {
+    let mut result = String::new();
+    for (i, line) in lines.enumerate() {
+        result.push_str(&format!("{:>4} | {}\n", start + i, line));
+    }
+    result
+}
+
 /// 编辑文件：精确字符串替换，自动备份
 pub fn apply_edit(path: &Path, old: &str, new: &str) -> Result<String, String> {
     if old.is_empty() {
@@ -152,4 +156,84 @@ pub fn apply_edit(path: &Path, old: &str, new: &str) -> Result<String, String> {
         count,
         new_content.len()
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn reject_absolute_path() {
+        let cwd = std::env::current_dir().unwrap();
+        if cfg!(windows) {
+            assert!(validate_path("C:\\Windows\\system32", &cwd).is_err());
+        } else {
+            assert!(validate_path("/etc/passwd", &cwd).is_err());
+        }
+    }
+
+    #[test]
+    fn reject_path_traversal_existing_parent() {
+        // Use the actual parent dir which exists, so canonicalize works
+        let cwd = std::env::current_dir().unwrap();
+        if cwd.parent().is_some() {
+            assert!(validate_path("..", &cwd).is_err());
+        }
+    }
+
+    #[test]
+    fn reject_dot_git_access() {
+        let cwd = std::env::current_dir().unwrap();
+        assert!(validate_path(".git/config", &cwd).is_err());
+    }
+
+    #[test]
+    fn reject_dot_git_in_subdir() {
+        let cwd = std::env::current_dir().unwrap();
+        assert!(validate_path("src/.git/hooks/pre-commit", &cwd).is_err());
+    }
+
+    #[test]
+    fn allow_normal_path() {
+        let cwd = std::env::current_dir().unwrap();
+        // Cargo.toml should exist in the project root
+        if cwd.join("Cargo.toml").exists() {
+            assert!(validate_path("Cargo.toml", &cwd).is_ok());
+        }
+        if cwd.join("src").exists() {
+            assert!(validate_path("src", &cwd).is_ok());
+        }
+    }
+
+    #[test]
+    fn strip_unc_prefix_preserves_normal() {
+        let p = Path::new("C:\\Users\\test");
+        let result = strip_unc_prefix(p);
+        assert_eq!(result, PathBuf::from("C:\\Users\\test"));
+    }
+
+    #[test]
+    fn strip_unc_prefix_strips() {
+        let p = Path::new("\\\\?\\C:\\Users\\test");
+        let result = strip_unc_prefix(p);
+        assert_eq!(result, PathBuf::from("C:\\Users\\test"));
+    }
+
+    #[test]
+    fn format_lines_basic() {
+        let lines = ["fn main() {", "    println!(\"hi\");", "}"];
+        let result = format_lines_with_numbers(lines.iter().copied(), 1);
+        assert!(result.contains("   1 | fn main() {"));
+        assert!(result.contains("   2 |     println!(\"hi\");"));
+        assert!(result.contains("   3 | }"));
+    }
+
+    #[test]
+    fn format_lines_offset() {
+        let lines = ["line4", "line5"];
+        let result = format_lines_with_numbers(lines.iter().copied(), 4);
+        assert!(result.contains("   4 | line4"));
+        assert!(result.contains("   5 | line5"));
+    }
 }

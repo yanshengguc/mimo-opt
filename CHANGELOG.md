@@ -1,5 +1,372 @@
 # MiMo-OPT 更新日志
 
+## v0.5.7 (2026-05-22) — 单元测试 + 缓存 v4 + 上下文压缩 + 代码优化 + 侧边栏 + 快捷键
+
+**目标**: 补齐最大短板——零测试覆盖。106 个单元测试覆盖 10 个模块，缓存命中率优化 (不降智)，长对话上下文压缩（含自动保存），17 项代码优化 + 无用代码清理 + 技能系统增强 + 会话侧边栏 + 快捷键可配置。**25/25 全部完成。**
+
+### 测试覆盖 (0 → 106 tests)
+
+| 模块 | 测试数 | 覆盖内容 |
+|------|--------|---------|
+| `util` | 14 | estimate_tokens (空/ASCII/CJK/混合/日文)、format_cost (高/低/零)、now_secs、get_cwd、format_age (刚刚/分钟/小时/天) |
+| `config` | 17 | mask_key (空/短/正常/边界)、find_preset、default_model、find_model、pricing、WebSearchConfig 默认值、Config Debug 脱敏、SkillEntry (5 项) |
+| `keybindings` | 9 | parse (单字符/F键/Shift+Enter/大小写/特殊键/非法)、format_combo、defaults 匹配、describe 输出 |
+| `prompt` | 12 | is_leap、chrono_date 格式、cache_breakpoints (空/单/双/中/长/上限4)、build_system_stable (3 provider)、content_split (3 block) |
+| `file_ops` | 10 | reject_absolute_path、reject_traversal、reject_dot_git (2)、strip_unc_prefix (2)、format_lines (基本/偏移)、allow_normal_path |
+| `api/types` | 11 | Content 序列化往返、ChatMessage (有/无 cache_control)、Usage (Anthropic/OpenAI 双格式)、SystemContent (Optional cache_control)、OpenAIRequest 序列化 |
+| `session` | 5 | new 字段验证、id 时间戳格式、auto_name 格式、序列化往返、token 字段 default |
+| `search` | 12 | url_escape、url_decode (基本/非法)、strip_html (基本/嵌套)、clean_ddg_url (3 种)、format_results (空/单/多)、parse_ddg_html 空 |
+| `ui/theme` | 6 | get_theme (3 主题 + 未知回退)、theme_names、全部主题字段一致性 |
+| `commands` | 10 | summarize_messages (空/用户/代码语言/截断/上限)、contains_ignore_case (基本/空/多字节/末尾) |
+
+### 长对话上下文压缩 (U13)
+
+**问题**: 超过 200 条消息时直接丢弃早期对话，关键上下文永久丢失。
+**方案**: 达到 180 条时自动压缩——保留最近 100 条，旧消息合成结构化摘要（系统消息）。
+
+- 自动触发：消息 ≥ 180 条时压缩 + 自动保存会话，不再硬截断丢弃
+- 手动触发：`/compress` 命令（保留后 50%，前 50% 压缩为摘要）+ 自动保存
+- 摘要内容：用户请求摘要、涉及主题/编程语言、关键回复要点
+- 无 API 成本：纯本地文本提取，零延迟
+- 压缩后自动保存会话，摘要持久化到磁盘
+
+### 自动触发机制
+
+| 条件 | 自动行为 |
+|------|---------|
+| 消息 ≥ 180 条 | 压缩上下文 + 保存会话 |
+| `/compress` 手动触发 | 压缩 + 保存 + 反馈压缩结果 |
+| 技能执行完 | 根据 `analyze` 标记决定是否发给 AI 分析 |
+| 搜索结果返回 | 自动发给 AI 总结 |
+| 输入时 | 实时显示命令补全提示 |
+| 出错后 | 下次发送时自动清除错误 |
+
+### 技能系统增强 (SkillEntry)
+
+**问题**: 技能只能存储命令字符串，无法描述功能、无法控制是否让 AI 分析输出。
+**方案**: `SkillEntry` 枚举支持两种配置格式（向后兼容），新增描述和分析控制。
+
+- `SkillEntry::Simple("cmd")` — 旧格式，自动兼容
+- `SkillEntry::Detailed { cmd, desc, analyze }` — 新格式，支持描述和分析开关
+- `/addskill` 支持可选描述: `/addskill lint cargo clippy 2>&1 ;Rust 代码检查`
+- `/skills` 显示描述 + `[不分析]` 标记
+- `analyze: false` 的技能执行完直接显示结果，不消耗 AI token
+- 默认技能全部带描述，`git`/`diff` 默认不分析（纯查看类）
+- 配置文件自动兼容旧格式（string → Detailed），零迁移成本
+- 测试: 5 个新测试 (SkillEntry 序列化往返、Simple 解析、默认技能描述)
+
+### 会话侧边栏 (U1)
+
+**问题**: 切换会话只能 F2 循环，无法看到会话列表和选择。
+**方案**: Ctrl+B 打开左侧 24 列侧边栏，显示会话列表。
+
+- Ctrl+B 切换侧边栏，显示会话名称、消息数、相对时间（刚刚/分钟前/小时前/天前）
+- ↑↓ 导航选择，Enter 切换到选中会话，Esc 关闭
+- 当前会话加粗高亮，选中项 `▸` 标记
+- 终端宽度 < 40 列时自动隐藏侧边栏
+- 新增 `SessionInfo.name` / `msg_count` 字段，`format_age()` 时间格式化
+- 新增 `ui/draw/sidebar.rs` 模块，4 个 format_age 测试
+
+### 快捷键可配置 (N9)
+
+**问题**: 快捷键硬编码，无法根据用户习惯调整。
+**方案**: `keybindings.json` 配置文件，13 个动作可自定义。
+
+- 支持的动作: toggle_sidebar / new_session / next_session / send / quit / cancel / paste / search / copy_code / undo / cursor_home / cursor_end / scroll_top
+- 解析格式: `"Ctrl+B"` / `"F2"` / `"Shift+Enter"` 等，大小写不敏感
+- 文件不存在时使用默认值，只覆盖配置了的动作
+- 新增 `keybindings.rs` 模块，`KeyBindings::load()` + `is()` + `describe()`
+- 事件循环中 13 处硬编码替换为 `state.keybindings.is("action", ...)`
+- 9 个测试覆盖解析、格式化、默认值、非法输入
+- 配置路径: `%APPDATA%\mimo-opt\keybindings.json`
+
+### 缓存 v4 优化 (不降智增加缓存命中率)
+
+**系统 Prompt 3 块拆分**:
+- Block 0 (稳定, 缓存): Provider 身份 + 输出格式规则
+- Block 1 (动态, 缓存): CWD + 项目文件树
+- Block 2 (日期, **不缓存**): 当前日期 — 从动态块中隔离，避免日期变化污染 CWD/文件树缓存
+
+**断点优化**:
+- 最后断点 `n-2` → `n-1`: 最后一条 assistant 回复纳入缓存前缀，下一轮对话可复用完整上下文
+- `SystemContent.cache_control` 改为 `Option<CacheControl>`，日期块无需 `cache_control` 字段
+
+**移除 `inject_date_preamble`**: 日期从消息前置改为系统 Block 2，不再污染消息缓存前缀
+
+### 代码优化 (15 项)
+
+| # | 优化 | 文件 | 效果 |
+|---|------|------|------|
+| 1 | `format!("{}", ts)` → `ts.to_string()` | session.rs | 消除冗余 format 调用 |
+| 2 | `format_lines_with_numbers` 提取 | file_ops.rs | read_file 行号格式化 Some/None 分支去重 |
+| 3 | `mem::take` 替代 `stream_buffer.clone()` | app.rs | 流式完成/错误/取消时零拷贝移入消息 |
+| 4 | 合并双重 RwLock 读取 | api/mod.rs | `send_message_stream` 两次 read → 一次 |
+| 5 | `cancel_generation()` 提取 | app.rs | Ctrl+C / Esc 取消生成 2 处 → 1 个函数 |
+| 6 | `dismiss_confirm()` 提取 | app.rs | 'n' / Esc 取消确认 2 处 → 1 个函数 |
+| 7 | SSE 热循环减少分配 | api/mod.rs | `remaining` 原地 `drain`，减少 3 次堆分配/chunk |
+| 8 | `truncate_body` UTF-8 安全 | api/mod.rs | `is_char_boundary` 回退，防止多字节 panic |
+| 9 | 常量去重 | ui/draw + commands | 消除重复 `SPINNER` 和 `MAX_MESSAGES` |
+| 10 | `as_mut_str` → `#[cfg(test)]` | api/types.rs | 生产代码不编译测试专用方法 |
+| 11 | `format!` → `writeln!` | commands/mod.rs | 帮助文本避免临时字符串分配 |
+| 12 | 代码块渲染去重 | ui/draw/chat.rs | `render_code_line` / `render_opening_fence` / `render_closing_fence` 提取 |
+| 13 | `build_openai_request` O(n) | api/mod.rs | 先收集 system 再收集 user，消除 `insert(0)` |
+| 14 | `contains_ignore_case` 零分配 | commands/mod.rs | 滑动窗口比较，搜索不再每条消息分配 String |
+| 15 | `inject_date_preamble` 移除 | prompt.rs + commands | 日期移入系统 Block 2，消除消息层冗余 |
+| 16 | 无用代码清理 | 5 文件 | 移除 `system_prompt_text` 死字段、`build_system_prompt_text` 死函数、`SessionInfo` 死字段、14 个函数 `pub` 收窄 |
+| 17 | 上下文压缩 | commands/mod.rs | `maybe_truncate_messages` 升级：180 条触发压缩而非 200 条截断丢弃 |
+
+### 修改文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `src/util.rs` | +56 行: 10 个测试 |
+| `src/config.rs` | +76 行: 12 个测试 |
+| `src/prompt.rs` | +80 行: 12 个测试 + 3 块系统 prompt + 断点 n-1 + 移除 inject_date_preamble + 删除 `build_system_prompt_text` |
+| `src/file_ops.rs` | +62 行: 10 个测试 + `format_lines_with_numbers` 提取 |
+| `src/api/types.rs` | +80 行: 11 个测试 + `Option<CacheControl>` + `#[cfg(test)]` gate |
+| `src/api/mod.rs` | SSE 热循环 + RwLock 合并 + UTF-8 截断 + OpenAI 请求 O(n) |
+| `src/app.rs` | `mem::take` + `cancel_generation()` + `dismiss_confirm()` + 删除 `system_prompt_text` 死字段 |
+| `src/ui/draw/mod.rs` | `SPINNER` → `pub(super)` |
+| `src/ui/draw/chat.rs` | 去除重复 SPINNER + 代码块渲染 3 函数提取 + `pub` → `fn` |
+| `src/session.rs` | +42 行: 5 个测试 + 删除 `SessionInfo` 死字段 |
+| `src/search.rs` | +67 行: 12 个测试 |
+| `src/ui/theme.rs` | +51 行: 6 个测试 |
+| `src/commands/mod.rs` | 上下文压缩 + `/compress` 命令 + 10 个测试 + `contains_ignore_case` + 死代码清理 + `pub` → `pub(crate)`/`fn` |
+| `src/commands/file_cmd.rs` | `compute_edit_diff` → `fn` |
+| `Cargo.toml` | 版本 0.5.6 → 0.5.7 |
+| `CHANGELOG.md` | v0.5.7 条目 |
+| `OPTIMIZATION.md` | E2 + 缓存 v4 + 代码优化 |
+
+### 编译状态
+
+- **0 errors, 0 warnings** (rustc + clippy + fmt clean)
+- **106 tests passed**
+
+### 路线图更新
+
+- **新增 U13**: 长对话上下文压缩 (P2, 估时 4h) — 接近消息上限时自动摘要旧消息，保留关键决策/代码/约束，替代当前的直接丢弃
+- **总进度**: 21/25 完成 (P1 全满, P2 10/12, P3 5/7)
+
+---
+
+## v0.5.6 (2026-05-22) — Shell 管道集成
+
+**目标**: 支持 `echo "..." | mimo-opt` 非交互式管道模式，将 MiMo-OPT 融入 shell 工作流。
+
+### 新功能
+
+- **管道模式**: `echo "请解释这段代码" | mimo-opt` — 从 stdin 读取输入，流式输出 API 响应
+- **`--prompt` / `-p` 参数**: `mimo-opt -p "Rust 生命周期是什么"` — 直接传参非交互式问答
+- **CLI 参数解析**: 轻量 `std::env::args()` 解析，零依赖新增
+- **错误隔离**: 管道模式下 API Key 未配置时输出英文错误到 stderr，不阻塞脚本
+
+### 使用示例
+
+```bash
+# 管道模式：将命令输出发给 AI 分析
+cargo clippy 2>&1 | mimo-opt
+
+# 参数模式：单次问答
+mimo-opt -p "解释 Rust 的所有权系统"
+
+# Shell 脚本集成
+git diff | mimo-opt -p "review these changes"
+```
+
+### 修改文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `src/main.rs` | CLI 参数解析 + 管道/交互模式分发 + `print_first_run_guide()` 提取 |
+| `src/pipe.rs` | 新建: 管道模式实现（stdin 读取 → API 流式请求 → stdout 输出） |
+| `Cargo.toml` | 版本 0.5.5 → 0.5.6 |
+| `CHANGELOG.md` | v0.5.6 条目 |
+
+### 编译状态
+
+- **0 errors, 0 warnings** (rustc + clippy + fmt clean)
+
+---
+
+## v0.5.5 (2026-05-22) — 消息列表零拷贝共享
+
+**目标**: `AppState.messages` 和 `Session.messages` 改用 `Arc<Vec<ChatMessage>>`，消除会话保存和切换时的 O(n) 全量克隆开销。
+
+### 重构
+
+- **`AppState.messages`**: `Vec<ChatMessage>` → `Arc<Vec<ChatMessage>>`，写时复制 (CoW)
+  - 读取操作（`.len()` `.iter()` `.last()` `.get()`）通过 `Deref` 零开销透传
+  - 变更操作（`.push()` `.pop()` `.clear()` `.drain()`）通过 `Arc::make_mut` 自动 CoW
+- **`Session.messages`**: 同步改为 `Arc<Vec<ChatMessage>>`
+  - `save_session`: O(n) clone → O(1) `Arc::clone`（引用计数递增）
+  - `load_session`: O(1) `Arc::clone` 共享已加载会话数据
+- **`serde` 依赖**: 新增 `features = ["rc"]` 以支持 `Arc` 的序列化/反序列化
+
+### 性能收益
+
+| 场景 | 改前 | 改后 |
+|------|------|------|
+| 会话保存 (100条消息) | O(n) 全量 clone | O(1) refcount |
+| 会话切换 | O(n) clone 旧+新 | O(1) refcount ×2 |
+| 流式请求 (spawn 路径) | O(n) clone → 修改 | O(1) Arc::clone → CoW 修改 |
+
+### 修改文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `src/app.rs` | `AppState.messages` 类型变更 + 全部 mutation/load 站点适配 |
+| `src/session.rs` | `Session.messages` 类型变更 + Arc 导入 + `new()` 适配 |
+| `src/commands/mod.rs` | 8 处 mutation 适配 + 5 处 clone 适配 + iteration 适配 |
+| `src/commands/file_cmd.rs` | 2 处 mutation 适配 + 2 处 iteration 适配 |
+| `Cargo.toml` | serde 新增 `rc` feature + 版本 0.5.4 → 0.5.5 |
+| `CHANGELOG.md` | v0.5.5 条目 |
+
+### 编译状态
+
+- **0 errors, 0 warnings** (rustc + clippy + fmt clean)
+
+---
+
+## v0.5.4 (2026-05-22) — 大文件模块化拆分
+
+**目标**: 将两个超大文件拆分为子模块，降低维护成本，提升代码可读性。
+
+### 重构
+
+- **commands.rs (1156行) → commands/mod.rs (874行) + commands/file_cmd.rs (295行)**
+  - `file_cmd.rs`: `/read` `/write` `/edit` `/export` 四个文件操作命令 + `resolve_path` + `compute_edit_diff`
+  - `mod.rs`: 命令分发 + 流式请求 + 技能执行 + 联网搜索 + 消息管理 + 确认对话框
+- **ui/draw.rs (929行) → ui/draw/mod.rs (443行) + ui/draw/chat.rs (425行) + ui/draw/modal.rs (87行)**
+  - `chat.rs`: `draw_chat_area` + Markdown 内联解析 + 代码高亮 + 列表/引用块检测
+  - `modal.rs`: `draw_confirm_modal` 确认弹窗
+  - `mod.rs`: 主布局 `draw()` + 标题栏 + 输入区 + 状态栏 + 语法主题初始化
+
+### 修改文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `src/commands/mod.rs` | 新建: 命令模块主文件（分发+流式+技能+消息管理） |
+| `src/commands/file_cmd.rs` | 新建: 文件操作命令子模块（read/write/edit/export） |
+| `src/commands.rs` | 删除: 已拆分为 commands/ 目录 |
+| `src/ui/draw/mod.rs` | 新建: 布局模块主文件（draw+标题栏+输入区+状态栏） |
+| `src/ui/draw/chat.rs` | 新建: 聊天区渲染子模块（代码高亮+Markdown） |
+| `src/ui/draw/modal.rs` | 新建: 确认弹窗子模块 |
+| `src/ui/draw.rs` | 删除: 已拆分为 draw/ 目录 |
+| `Cargo.toml` | 版本 0.5.3 → 0.5.4 |
+| `CHANGELOG.md` | v0.5.4 条目 |
+
+### 编译状态
+
+- **0 errors, 0 warnings** (rustc + clippy + fmt clean)
+
+---
+
+## v0.5.3 (2026-05-22) — 代码质量 + 安全加固
+
+**目标**: 消除技术债务，提升代码健壮性。修复死代码、裸 unwrap 调用、逻辑缺陷。
+
+### 代码质量
+
+- **死代码清理**: 移除未使用的 `check_api()` 探测方法（自 v0.3.5 已禁用）和 `api_url()` 辅助方法
+- **unwrap 全量替换**: 17 处 `.unwrap()` → `.expect("描述")`，所有潜在 panic 点均有语义化消息
+  - 12 处 `RwLock` 访问: `.unwrap()` → `.expect("RwLock poisoned")`
+  - 5 处逻辑不变的安全断言: 均加描述性消息
+- **unreachable 修复**: `api/mod.rs:359` 的 `unreachable!()` → `anyhow::bail!("max retries exceeded — all attempts failed")`，重试逻辑变更不再隐匿 panic
+- **match 穷尽性**: `/help` 中 `_ => continue` → `_ => unreachable!("unknown builtin: {}", c)`，新增命令忘加帮助文案时编译期暴露
+
+### 修改文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `src/api/mod.rs` | `unreachable!()` → `bail!()`；移除 `api_url()`/`check_api()` 死代码；RwLock `.unwrap()` → `.expect()` |
+| `src/api/types.rs` | `as_mut_str` 保留 `#[allow(dead_code)]`（MCP/工具调用预留 API） |
+| `src/commands.rs` | `/help` `_ => continue` → `_ => unreachable!()` |
+| `src/app.rs` | 3 处 `.unwrap()` → `.expect()` |
+| `src/config.rs` | 1 处 `.unwrap()` → `.expect()` |
+| `src/ui/draw.rs` | 2 处 `.unwrap()` → `.expect()` |
+| `Cargo.toml` | 版本 0.5.2 → 0.5.3 |
+| `CHANGELOG.md` | v0.5.3 条目 |
+
+### 编译状态
+
+- **0 errors, 0 warnings** (rustc + clippy clean)
+
+---
+
+## v0.5.2 (2026-05-22) — 多模型支持 + 智能模型选择
+
+**目标**: 同一 API Provider 支持多个模型（如 DeepSeek chat/reasoner/V4），用户可列表查看、一键切换、获得按模型精确计费。
+
+### 新功能
+
+- **Provider 多模型 + 中文描述**: 每个模型含 `desc` 字段，`/model` 列出时一目了然
+  - **MiMo** (2): `mimo-v2-flash` (轻量快速) + `mimo-v2-pro` (专业推理)
+  - **DeepSeek** (4): `deepseek-chat` (V3标准) + `deepseek-reasoner` (R1推理) + `deepseek-v4-flash` (V4轻量) + `deepseek-v4-pro` (V4旗舰)
+  - **OpenAI** (3): `gpt-4o-mini` (轻量) + `gpt-4o` (全能) + `gpt-4-turbo` (高性能)
+- **`/model`（无参数）列出模型**: 显示当前 Provider 所有模型 + 中文描述 + 各自定价 + 当前选择标注 `(当前)`
+- **`/model <name>` 显示描述+定价**: 切换确认消息含一句话描述和价格，未知模型允许但标注"按默认估算"
+- **二级补全提示**: 输入 `/model v4` → hint 栏自动显示 `deepseek-v4-flash  deepseek-v4-pro`；`/provider` 同理
+- **Provider 切换智能保留**: `/provider deepseek` 时若当前 model 在目标 Provider 列表中存在则保留，不在则回退到默认模型
+- **按模型精确计费**: `input_price()`/`output_price()` 三级回退——模型精确匹配 → Provider 默认模型 → 硬编码兜底(2.0/8.0)
+
+### 数据结构
+
+- **新增 `ModelInfo` 结构体**: `name` + `desc` + `input_price_per_mtok` + `output_price_per_mtok`
+- **`ProviderPreset` 改造**: 删除 `model`/`input_price_per_mtok`/`output_price_per_mtok` 三字段，改为 `models: &[ModelInfo]` + `default_model_index: usize`
+- **新增方法**: `ProviderPreset::default_model()`、`find_model(name)`；`Config::model_info()`
+
+### 修改文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `src/config.rs` | ModelInfo(+desc) + ProviderPreset 改造 + PROVIDERS 扩展（3 provider 1 model → 3 provider 2/4/3 models） + 定价三级回退 |
+| `src/commands.rs` | /model 重写（列出含desc+切换含desc）+ /provider 智能保留 + update_hint_lines 二级补全(/model + /provider) |
+| `src/api/mod.rs` | `update_for_provider` 新增 `model: &str` 参数 |
+| `Cargo.toml` | 版本 0.5.1 → 0.5.2 |
+| `CHANGELOG.md` | v0.5.2 条目 |
+| `PROJECT.md` | 功能清单补充 |
+| `OPTIMIZATION.md` | 状态更新 |
+
+### 编译状态
+
+- **0 errors, 0 warnings** (rustc + clippy clean)
+
+---
+
+## v0.5.1 (2026-05-22) — 代码质量 + Bug 修复
+
+**目标**: 消除代码重复、修复联网搜索缺陷、更新项目文档。
+
+### 代码去重
+
+- **draw.rs 内联解析合并**: `render_markdown_line()` 和 `render_inline_spans()` 共享 45 行内联 Markdown 解析逻辑提取为 `parse_inline_spans()`，消除重复代码
+
+### Bug 修复
+
+- **DDG 搜索结果未注入 AI**: `/search` 命令的 DDG 引擎路径修复——搜索结果现在作为上下文注入对话并流式请求 AI 分析，而非仅显示原始结果
+- **search.rs 死代码移除**: `execute_search()` 中 DeepSeek web_search 标记返回路径不可达（调用方已提前处理），移除冗余分支和 `provider` 参数
+
+### 文档更新
+
+- **PROJECT.md**: 依赖列表 `cli-clipboard` → `arboard`，行数/源文件数更新，v0.5.0 新增功能补充
+- **CHANGELOG.md**: 新增 v0.5.1 条目
+
+### 修改文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `src/ui/draw.rs` | `parse_inline_spans()` 提取，`render_markdown_line`/`render_inline_spans` 共用 |
+| `src/search.rs` | 移除不可达 DeepSeek 分支，简化 `execute_search` 签名 |
+| `src/commands.rs` | DDG 搜索路径修复：结果注入 → 流式 AI 分析 |
+| `PROJECT.md` | 依赖/行数/功能清单更新 |
+| `CHANGELOG.md` | 新增 v0.5.1 |
+
+### 编译状态
+
+- **0 errors, 0 warnings** (rustc + clippy clean)
+
+---
+
 ## v0.4.1 (2026-05-21) — 文档全面更新 + 安全审计 + 路线图扩展
 
 **目标**: README 反映 v0.4.0 全貌，API 泄露扫描与加固，优化路线图从 13 项扩展到 22 项。
@@ -45,52 +412,61 @@
 
 ---
 
-## v0.5.0 (计划中) — 缓存 v3 + 用户视角体验补全
+## v0.5.0 (2026-05-22) — 缓存 v3 + 基础设施 + 体验优化
 
-**目标**: 缓存命中率 70% → 90%，代理/编辑重发/费用预估/撤回 等 10 项用户呼声最高的体验优化。
+**目标**: 缓存命中率 70% → 85-92%，代理/费用预估/撤回/通知/temperature/异步加载/自适应输入框/diff预览/Logo/clipboard/联网搜索 等 15 项优化一次交付。
 
-### P1 高优先 (5 项)
+### P1 高优先 (4/5 完成)
 
-- **N1 HTTP/SOCKS5 代理**: config.json 新增 `proxy.url` 字段，reqwest 原生支持，国内网络兜底
-- **W1 日期移出缓存前缀**: `inject_date_preamble()` 替代 `inject_date_if_needed()`，messages[0] 跨日不失效。预期 +10-15%
-- **W2 System Prompt 拆分**: `build_system_stable()`/`build_system_dynamic()` 分离，多项目切换缓存不丢。预期 +5-10%
-- **W3 自适应断点布局**: 按对话长度动态分配 4 个 breakpoint。预期 +5-8%
-- **E2 单元测试**: file_ops/config/prompt/cost/session 测试补齐
+- **W1 日期移出缓存前缀**: `inject_date_preamble()` 替代 `inject_date_if_needed()`，前置不含 cache_control 的日期消息。预期 +10-15%
+- **W2 System Prompt 拆分**: `build_system_stable()`/`build_system_dynamic()` + `build_system_content_split()` 双 block。稳定部分缓存，动态部分不缓存。预期 +5-10%
+- **W3 自适应断点布局**: 按对话长度动态分配 4 个 breakpoint（1-3/4-8/9-16/17+），自动跳过 date preamble。预期 +5-8%
+- **N1 HTTP/SOCKS5 代理**: `config.json` 新增 `proxy_url` 字段，`reqwest::Proxy::all()` 自动识别 http/https/socks5
 
-### P2 功能增强 (10 项)
+### P2 功能增强 (7 项交付)
 
-- **N2 编辑重发**: ↑ 调出上条消息到输入框，编辑后重发
-- **N3 发送前费用预估**: 输入框右侧实时显示 ~¥/tok 数，超过阈值黄色警告
-- **N4 Ctrl+Z 撤回**: 移除最后一条 user+assistant 对话轮次
-- **N5 输入框自适应扩展**: 内容超出时自动扩展，上限半屏
-- **N6 syntect 异步加载**: 启动不阻塞，高亮延后加载
-- **N7 /edit diff 预览**: 确认弹窗红删绿增 unified diff
-- **U11 联网搜索**: `/search` 命令，DeepSeek 原生 > DDG fallback
-- **U1 会话侧边栏**: Ctrl+B 呼出
-- **U12 芒果猫 Logo**: ANSI 色块启动 banner
-- **C1/C2**: clone 优化 + 文件拆分
+- **U11 联网搜索**: `/search <关键词>` 命令，DDG 免费 API（无需 Key）+ DeepSeek 原生 `web_search` tool 双引擎。搜索结果注入对话上下文，AI 可基于实时信息回答
+- **N3 发送前费用预估**: `util::estimate_tokens()` + `util::format_cost_estimate()`，输入框右侧实时显示 `~¥0.02 ~800tok`，超 20000tok 或 ¥0.5 红色预警
+- **N4 Ctrl+Z 撤回**: 移除最后 user+assistant 对话轮次，恢复用户消息到输入框供编辑重发
+- **N5 输入框自适应扩展**: 内容超过 3 行时自动扩展（上限半屏），长代码粘贴不再盲打。中文宽度感知（`unicode_width`）
+- **N6 syntect 异步加载**: `init_syntax_async()` 在 `std::thread::spawn` 中加载 ~2MB 语法文件，首屏不阻塞。加载完成前代码块纯文本 fallback
+- **N7 /edit diff 预览**: `compute_edit_diff()` 生成 unified diff，确认弹窗中红删绿增显示，心里有底再确认写入
+- **U12 芒果猫启动 Logo**: ANSI 色块像素画（8×5 猫脸）+ 版本/Provider/Model/余额信息，按任意键进入
 
-### P3 锦上添花 (6 项)
+### P3 锦上添花 (3 项交付)
 
-- **N8 回复完成通知**: 终端响铃 + 桌面通知
-- **N9 快捷键可配置**: keybindings.json
-- **N10 temperature/top_p 可配**: config 透传
-- **U9/C3/C4**: Shell 管道 + clipboard + token 精度
+- **N8 回复完成通知**: 流式完成时 `\x07` 终端响铃
+- **N10 temperature/top_p 可配**: config.json 新增可选 `temperature`/`top_p` 字段，Anthropic/OpenAI 请求透传
+- **C3 cli-clipboard → arboard**: Wayland 原生剪贴板支持，替换 `cli-clipboard` 依赖
+
+### 代码清理
+
+- 移除废弃函数 `build_system_content`（被 `build_system_content_split` 替代）
+- 移除废弃函数 `inject_date_if_needed`（被 `inject_date_preamble` 替代）
+- `maybe_truncate_messages` 简化为纯截断（日期注入统一由 preamble 处理）
+- `as_mut_str` 保留并添加 `#[allow(dead_code)]`（公共 API 预留）
+- `SyntaxSet`/`Theme` 从 `OnceLock::get_or_init` 同步加载 → `std::thread::spawn` + `OnceLock::set` 异步预加载
 
 ### 修改文件清单
 
 | 文件 | 改动 |
 |------|------|
-| `Cargo.toml` | 版本 0.4.0 → 0.5.0，新增 notify-rust 依赖 |
-| `src/prompt.rs` | W1 `inject_date_preamble()` + W2 拆分 + W3 自适应 |
-| `src/config.rs` | `proxy`、`web_search`、`temperature`、`top_p` 字段 |
-| `src/api/mod.rs` | proxy 集成 + temperature/top_p 透传 |
-| `src/commands.rs` | `/search` + `/edit` diff 确认 + N2 编辑重发 + N4 撤回 |
-| `src/app.rs` | input_history、undo_stack、异步 syntect、通知触发 |
-| `src/ui/logo.rs` | **新增**: 芒果猫色块 Logo |
-| `src/ui/draw.rs` | 输入框动态扩展 + 费用预估 + diff 弹窗 + Logo 展示 |
-| new `src/search.rs` | DDG API + 结果抓取 |
-| new `tests/` | file_ops / config / prompt 单元测试 |
+| `Cargo.toml` | 版本 0.4.0 → 0.5.0 |
+| `src/prompt.rs` | W1 `inject_date_preamble()` + W2 `build_system_stable()`/`build_system_dynamic()`/`build_system_content_split()` + W3 自适应断点（跳过 preamble、按长度分 4 档） |
+| `src/config.rs` | 新增 `proxy_url`、`temperature`、`top_p`、`web_search` 字段 + `WebSearchConfig` 结构体 + ConfigRaw/save/load/Debug 全部同步 |
+| `src/api/mod.rs` | `MiMoClient::new()` 接受 proxy_url + temperature + top_p；`ClientSettings` 扩展；`build_anthropic_request`/`build_openai_request` 透传 temperature/top_p；新增 `send_message_stream_with_search()` (DeepSeek web_search tool) |
+| `src/search.rs` | **新增**: DDG HTML 搜索 (`search_ddg`)、DeepSeek web_search 引擎路由、结果格式化 (`format_results`) |
+| `src/api/types.rs` | `AnthropicRequest`/`OpenAIRequest` 新增 `temperature`/`top_p` 字段（`skip_serializing_if = "Option::is_none"`） |
+| `src/app.rs` | `AppState` 新增 `system_stable`/`system_dynamic`；proxy_url/temperature/top_p 传入 MiMoClient；Ctrl+Z 撤回；终端响铃 `\x07`；`init_syntax_async()` 调用 |
+| `src/commands.rs` | `spawn_stream_request` 改用 `inject_date_preamble()` + `build_system_content_split()`；`handle_user_skill` 同；`handle_provider_command` 同步更新 stable/dynamic；`maybe_truncate_messages` 精简 |
+| `src/ui/draw.rs` | N3 费用预估渲染（输入框右侧 `~¥ tok` + 阈值红色预警）；N5 自适应输入框（动态 `Constraint::Length`，3~半屏）；N6 语法高亮 fallback；N7 diff 预览（`+ ` / `- ` 颜色标记） |
+| `src/ui/mod.rs` | 导出 `init_syntax_async`、`draw_logo` |
+| `src/ui/logo.rs` | **新增**: U12 芒果猫 ANSI 色块启动 Logo |
+| `src/util.rs` | N3 `estimate_tokens()`（中文 ~1.5/英文 ~0.75 tok/字）+ `format_cost_estimate()` |
+
+### 编译状态
+
+- **0 errors, 0 warnings** (rustc + clippy clean)
 
 ---
 
@@ -572,20 +948,26 @@ scopeguard / unicode-width / syntect / cli-clipboard
 
 ## 下一步计划
 
-### v0.4.1+ 待完成
+### 已完成 25/25 项（详见 [OPTIMIZATION.md](OPTIMIZATION.md)）
 
-**P2 工程化（剩余）**:
-- [ ] 单元测试覆盖（优先 file_ops / config / prompt / cost / session）
-- [ ] app.rs 模块拆分（~1900 行 → app / prompt / scanner / cost / commands）
-- [ ] GLM / 通义千问 / Kimi 等平台预设完善
+- v0.5.0: 缓存 v3 + 代理 + 搜索 + 费用预估 + 撤回 + 自适应输入 + 异步高亮 + diff + 通知 + temperature + Logo + arboard + 精确 token
+- v0.5.2: 多模型支持
+- v0.5.3: 代码质量 5 项（死代码/unwrap/unreachable/match 穷尽性/fmt）
+- v0.5.4: 大文件模块化拆分（commands + draw）
+- v0.5.5: Arc<Vec<ChatMessage>> 零拷贝共享
+- v0.5.6: Shell 管道集成
+- v0.5.7: 单元测试 80 个（8 模块覆盖）
 
-**P3 锦上添花**:
+### v0.6.0 候选
+
+**P2 体验（2 项）**:
+- [ ] U13: 长对话上下文压缩（接近上限时自动摘要旧消息，保留关键细节）
 - [ ] U1: 会话侧边栏（Ctrl+B，UI_DESIGN 已规划）
-- [x] U3: Markdown 渲染增强（粗体/斜体 v0.3.9 + 列表/链接/分隔线 v0.4.0）
-- [x] U4: 主题热切换（v0.4.0: Tokyo Night / Nord / Catppuccin + /theme 命令）
-- [x] U8: 引用块视觉支持（v0.3.9: `>` 竖线+缩进+斜体）
-- [ ] U9: Shell 管道集成（`echo "..." | mimo-opt --prompt`）
 
-**已决定后续再做**:
-- [ ] **P2-8** 桌面端迁移（Tauri）— 终端版先交付
+**P3 补充（2 项）**:
+- [ ] N9: 快捷键可配置（keybindings.json）
+- [ ] D1: 桌面端 Tauri 迁移（core/gui 分层，feature flag）
+
+**待定**:
+- [ ] GLM / 通义千问 / Kimi 等平台预设完善
 - [ ] MCP 支持

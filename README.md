@@ -1,6 +1,6 @@
 # MiMo-OPT
 
-> **芒果猫** · 终端 AI 编程助手 · v0.4.0
+> **芒果猫** · 终端 AI 编程助手 · v0.5.0
 
 Rust 编写的多 Provider 终端 AI 聊天工具。接上 API Key 就能用，单二进制 ~5MB，零运行时依赖。
 
@@ -21,13 +21,13 @@ Rust 编写的多 Provider 终端 AI 聊天工具。接上 API Key 就能用，�
 | OpenAI | OpenAI 兼容 (bearer) | ✅ 已集成 |
 | 自定义 | OpenAI 兼容 | ✅ 任意兼容 API |
 
-### 缓存优化 — 省 70%+ 的输入费用
+### 缓存优化 — 省 85-92% 输入费用
 
-Anthropic 格式支持渐进式多断点前缀缓存，状态栏实时显示 `♻` 命中率：
+Anthropic 格式完整缓存方案（v3），状态栏实时显示 `♻` 命中率：
 
-- **System prompt 缓存**：身份+规则部分稳定缓存，cwd/项目树不含在缓存内不污染
-- **渐进式多断点**：`messages[0]` + 每 5 条一个断点，最多 4 个（Anthropic 上限）
-- **缓存 v3 计划中**：日期移出前缀 + 自适应断点，命中率目标 85-92%
+- **System Prompt 拆分**：身份+格式规则稳定缓存，cwd/项目文件树独立 block 不污染
+- **日期移出缓存前缀**：日期以独立 preamble 消息注入，不破坏 stable block 缓存
+- **自适应多断点**：按对话长度动态分配 4 个断点（1-3/4-8/9-16/17+），末轮对话始终命中
 
 ### 代码块语法高亮
 
@@ -54,6 +54,22 @@ AI 直接读/写/编辑项目文件：
 
 `/命令名` 执行预配置 shell 命令，输出自动发送给 AI 分析。支持参数传递、5 个内置默认技能、TUI 内增删技能。
 
+### 联网搜索
+
+`/search <关键词>` 触发，DDG 免费 API（无需 Key）+ DeepSeek 原生 web_search 双引擎。搜索结果格式化注入对话，AI 可基于实时信息回答问题。
+
+### 智能输入体验
+
+- **费用预估**：输入框右侧实时显示 `~¥0.02 ~800tok`，超 20000tok 或 ¥0.5 红色预警
+- **自适应输入框**：内容超 3 行自动扩展（上限半屏），中文宽度精确感知
+- **Ctrl+Z 撤回**：误发消息后移除最后对话轮次，消息恢复到输入框
+- **编辑重发**：↑/↓ 浏览已发送消息，编辑后 Ctrl+Enter 重发
+- **Ctrl+V 粘贴** / **Ctrl+Y 复制代码块**：Wayland/X11/macOS/Windows 全平台支持（arboard）
+
+### 芒果猫启动 Logo
+
+ANSI 真彩色块像素画（8×5 猫脸），橘色系配色，右侧展示版本/Provider/Model/余额。按任意键进入主界面。
+
 ### 3 套内置主题
 
 `/theme tokyo-night|nord|catppuccin` 即时切换，无需重启，选择持久化到 config.json。
@@ -78,12 +94,15 @@ DeepSeek Provider 启动时自动查询余额，标题栏显示 `¥X.XX`，余�
 
 ### 其他
 
+- **HTTP/SOCKS5 代理**：`proxy_url` 配置，国内网络兜底
+- **temperature / top_p**：config 可选透传，控制模型输出创造性
+- **回复通知**：AI 回复完成终端响铃 `\x07`
+- **/edit diff 预览**：确认弹窗红删绿增，心里有底再写入
+- **syntect 异步加载**：首屏不阻塞，启动秒开
 - **UTF-8 安全**：正确处理跨 chunk 多字节字符，中文/emoji 不断裂
 - **单二进制**：~5MB，SSH 到远程服务器直接用
 - **0 clippy warnings**：代码质量基线
-- **Ctrl+V 粘贴**、**Ctrl+Y 复制代码块**、**Ctrl+F 搜索**
-- **长消息确认**：超过 5 行弹确认框防止误触
-- **终端尺寸检查**：< 60×20 显示警告
+- **Ctrl+F 搜索**、**长消息确认**、**终端尺寸检查**
 
 ## 快速开始
 
@@ -136,7 +155,15 @@ cargo build --release
   "model": "deepseek-chat",
   "auth_type": "bearer",
   "api_format": "openai",
-  "max_tokens": 4096
+  "max_tokens": 4096,
+  "theme": "tokyo-night",
+  "proxy_url": "http://127.0.0.1:7890",
+  "temperature": 0.7,
+  "web_search": { "enabled": true, "engine": "ddg", "max_results": 5 },
+  "skills": {
+    "lint": "cargo clippy 2>&1",
+    "test": "cargo test 2>&1"
+  }
 }
 ```
 
@@ -167,6 +194,8 @@ cargo build --release
   "max_tokens": 4096
 }
 ```
+
+> 可选字段：`proxy_url`（HTTP/SOCKS5 代理）、`temperature`/`top_p`（推理参数）、`theme`（tokyo-night/nord/catppuccin）、`web_search`（联网搜索配置）、`skills`（自定义技能命令）。
 
 **自定义 OpenAI 兼容 API**（GLM、通义千问等）：
 
@@ -225,14 +254,22 @@ cargo build --release
 | `/edit <path> <old> <new>` | 精确字符串替换（需确认，自动备份） |
 | `/export [path]` | 导出会话为 Markdown（含元信息，默认 `{session}.md`） |
 | `/clear` | 清空当前对话（需确认） |
-| `/model <name>` | 运行时切换模型（如 `/model deepseek-reasoner`） |
-| `/provider <name>` | 切换 Provider 预设（如 `/provider openai`），自动更新 endpoint/auth/费率 |
-| `/theme <name>` | 切换主题（`tokyo-night` / `nord` / `catppuccin`），立即生效 |
+| `/model` | 列出当前 Provider 所有模型 + 描述 + 定价 |
+| `/model <name>` | 切换模型（如 `/model deepseek-v4-pro`），含定价确认 |
+| `/provider` | 列出所有 Provider 预设 |
+| `/provider <name>` | 切换 Provider（如 `/provider openai`），智能保留兼容模型 |
+| `/search <关键词>` | 联网搜索（DDG 免费引擎 / DeepSeek 原生） |
 | `/theme` | 列出所有可用主题 |
+| `/theme <name>` | 切换主题（`tokyo-night` / `nord` / `catppuccin`），立即生效 |
 | `/skills` | 列出全部技能 |
 | `/addskill <name> <cmd>` | 添加技能 |
 | `/rmskill <name>` | 删除技能 |
 | `/errors` | 查看 API 错误历史（最近 20 条） |
+| `/export [path]` | 导出会话为 Markdown |
+| `/clear` | 清空当前对话（需确认） |
+| `/read <path>[:range]` | 读取文件注入上下文（如 `/read src/main.rs:10-50`） |
+| `/write <path>` | 提取对话中最后一个代码块写入文件（需确认） |
+| `/edit <path> <old> <new>` | 精确字符串替换（需确认，自动备份） |
 | `/help` | 显示帮助 |
 | `/skill_name [args]` | 执行技能命令（如 `/lint --fix`） |
 
@@ -297,21 +334,23 @@ cargo build --release
 ```
 src/
 ├── main.rs           # 入口，首次运行引导 5 种 Provider 方案
-├── config.rs         # 配置管理（Config/ProviderPreset，JSON 读写 0600 权限）
-├── app.rs            # AppState + 事件循环 + 键盘分发（~713 行）
-├── commands.rs       # 命令调度 + 流式请求 + 确认弹窗 + 搜索（~967 行）
-├── prompt.rs         # System prompt 构建 + 缓存断点策略 + 日期注入
-├── scanner.rs        # 项目文件树扫描（100 文件 / 深度 5）
-├── file_ops.rs       # 文件 read/write/edit + 路径沙箱 + 自动备份
+├── config.rs         # 配置管理（Config/ProviderPreset/WebSearchConfig，JSON 读写 0600）
+├── app.rs            # AppState + 事件循环 + 键盘分发 + Logo 展示
+├── commands.rs       # 命令调度 + 文件操作 + 确认弹窗 + 搜索 + 技能 + /search
+├── prompt.rs         # System prompt 构建 + 缓存断点 v3 + 日期 preamble
+├── scanner.rs        # 项目文件树扫描
+├── search.rs         # DDG/DeepSeek 联网搜索 + HTML 解析
+├── file_ops.rs       # 文件 read/write/edit + 路径沙箱 + 自动备份 + diff 预览
 ├── session.rs        # 会话持久化（多会话 JSON 存储 + 自动命名）
-├── util.rs           # now_secs() / get_cwd()
+├── util.rs           # now_secs() / get_cwd() / estimate_tokens()
 ├── api/
-│   ├── mod.rs        # MiMoClient（流式 SSE + 重试 + RwLock 热切换）
-│   └── types.rs      # API 类型（Content enum + Anthropic/OpenAI 双格式）
+│   ├── mod.rs        # MiMoClient（流式 SSE + 重试 + RwLock 热切换 + web_search）
+│   └── types.rs      # API 类型（Content enum + Anthropic/OpenAI 双格式 + temperature/top_p）
 └── ui/
     ├── mod.rs        # 模块导出
-    ├── theme.rs      # ThemeColors  + 3 套色板
-    └── draw.rs       # 界面渲染（7 区布局 + Markdown + 高亮 + 搜索/确认弹窗）
+    ├── logo.rs       # 芒果猫 ANSI 色块启动 Logo
+    ├── theme.rs      # ThemeColors + 3 套色板
+    └── draw.rs       # 界面渲染（自适应布局 + Markdown + 高亮 + diff + 费用预估）
 ```
 
 ## 评分 & 路线图

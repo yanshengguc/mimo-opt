@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::mem;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,14 +13,15 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::api::{ChatMessage, Content, MiMoClient, StreamResult};
 use crate::commands;
-use crate::config::Config;
+use crate::config::{Config, SkillEntry};
+use crate::keybindings::KeyBindings;
 use crate::prompt;
 use crate::scanner;
 use crate::session::{Session, SessionInfo};
 use crate::ui;
 
-const MAX_MESSAGES: usize = 200;
-const MESSAGE_WARN_THRESHOLD: usize = 160;
+pub const MAX_MESSAGES: usize = 200;
+const MESSAGE_WARN_THRESHOLD: usize = 170;
 
 #[derive(Clone)]
 pub enum ConfirmAction {
@@ -48,7 +50,7 @@ pub struct ConfirmState {
 
 pub struct AppState {
     pub config: Config,
-    pub messages: Vec<ChatMessage>,
+    pub messages: Arc<Vec<ChatMessage>>,
     pub input: String,
     pub cursor_pos: usize,
     pub generating: bool,
@@ -64,9 +66,10 @@ pub struct AppState {
     pub should_quit: bool,
     pub api_ok: Option<bool>,
     pub api_error_detail: Option<String>,
-    pub system_prompt_text: String,
+    pub system_stable: String,
+    pub system_dynamic: String,
     pub project_tree: String,
-    pub skills: HashMap<String, String>,
+    pub skills: HashMap<String, SkillEntry>,
     pub input_history: Vec<String>,
     pub history_idx: Option<usize>,
     pub input_draft: String,
@@ -81,12 +84,18 @@ pub struct AppState {
     pub copy_status: Option<String>,
     pub session: Session,
     pub session_list: Vec<SessionInfo>,
+    pub sidebar_open: bool,
+    pub sidebar_idx: usize,
+    pub keybindings: KeyBindings,
     pub cancel_tx: Option<oneshot::Sender<()>>,
     pub balance_info: Option<(String, f64)>,
     pub balance_rx: Option<oneshot::Receiver<Option<(String, f64)>>>,
 }
 
 pub async fn run(config: Config) -> anyhow::Result<()> {
+    // 异步预加载语法高亮，不阻塞首屏渲染
+    ui::init_syntax_async();
+
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -106,6 +115,9 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         config.auth_type.clone(),
         config.api_format.clone(),
         config.max_tokens,
+        config.proxy_url.clone(),
+        config.temperature,
+        config.top_p,
     ));
 
     let project_tree = scanner::scan_project_tree();
@@ -120,7 +132,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     } else {
         Session::new(Session::auto_name())
     };
-    let messages = session.messages.clone();
+    let messages = Arc::clone(&session.messages);
 
     let mut state = AppState {
         config,
@@ -140,7 +152,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         should_quit: false,
         api_ok: None,
         api_error_detail: None,
-        system_prompt_text: String::new(),
+        system_stable: String::new(),
+        system_dynamic: String::new(),
         project_tree,
         skills,
         input_history: Vec::new(),
@@ -157,6 +170,9 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         copy_status: None,
         session,
         session_list,
+        sidebar_open: false,
+        sidebar_idx: 0,
+        keybindings: KeyBindings::load(),
         cancel_tx: None,
         balance_info: None,
         balance_rx: None,
@@ -173,8 +189,32 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         }
     }
 
-    state.system_prompt_text =
-        prompt::build_system_prompt_text(&state.project_tree, &state.config.provider);
+    state.system_stable = prompt::build_system_stable(&state.config.provider);
+    state.system_dynamic = prompt::build_system_dynamic(&state.project_tree);
+
+    // 启动 Logo（按任意键跳过）
+    {
+        let mut logo_shown = true;
+        terminal.draw(|f| {
+            let balance_str = state.balance_info.as_ref().map(|(s, _)| s.as_str());
+            ui::draw_logo(
+                f,
+                f.area(),
+                env!("CARGO_PKG_VERSION"),
+                &state.config.provider,
+                &state.config.model,
+                balance_str,
+            );
+        })?;
+
+        while logo_shown {
+            if event::poll(Duration::from_millis(100))? {
+                if let Event::Key(_) = event::read()? {
+                    logo_shown = false;
+                }
+            }
+        }
+    }
 
     let (token_tx, mut token_rx) = mpsc::channel::<StreamResult>(256);
 
@@ -237,9 +277,9 @@ async fn run_loop(
                     state.generating = false;
                     state.cancel_tx = None;
                     if !state.stream_buffer.is_empty() {
-                        state.messages.push(ChatMessage {
+                        Arc::make_mut(&mut state.messages).push(ChatMessage {
                             role: "assistant".to_string(),
-                            content: Content::text(state.stream_buffer.clone()),
+                            content: Content::text(mem::take(&mut state.stream_buffer)),
                             cache_control: None,
                         });
                     }
@@ -248,7 +288,6 @@ async fn run_loop(
                     state.total_cache_creation_tokens += cache_creation_tokens;
                     state.total_cache_read_tokens += cache_read_tokens;
                     state.total_cost = calculate_cost(state);
-                    state.stream_buffer.clear();
                     state.chat_scroll = 0;
                     state.api_ok = Some(true);
                     state.api_error_detail = None;
@@ -259,6 +298,11 @@ async fn run_loop(
                         cache_read_tokens
                     );
 
+                    // 终端响铃通知回复完成
+                    use std::io::Write;
+                    let _ = std::io::stderr().write_all(b"\x07");
+                    let _ = std::io::stderr().flush();
+
                     if state.messages.len().is_multiple_of(5) {
                         commands::save_session(state);
                     }
@@ -267,12 +311,11 @@ async fn run_loop(
                     state.generating = false;
                     state.cancel_tx = None;
                     if !state.stream_buffer.is_empty() {
-                        state.messages.push(ChatMessage {
+                        Arc::make_mut(&mut state.messages).push(ChatMessage {
                             role: "assistant".to_string(),
-                            content: Content::text(state.stream_buffer.clone()),
+                            content: Content::text(mem::take(&mut state.stream_buffer)),
                             cache_control: None,
                         });
-                        state.stream_buffer.clear();
                     }
                     state.error_message = Some(err.clone());
                     state.error_history.push(err.clone());
@@ -321,24 +364,10 @@ async fn run_loop(
                         if state.pending_confirm.is_some()
                             && !key.modifiers.contains(KeyModifiers::CONTROL) =>
                     {
-                        if let Some(ref c) = state.pending_confirm {
-                            if let ConfirmAction::SendMessage { ref message } = c.action {
-                                state.input = message.clone();
-                                state.cursor_pos = state.input.len();
-                            }
-                        }
-                        state.pending_confirm = None;
-                        commands::push_cancelled_message(state);
+                        dismiss_confirm(state);
                     }
                     KeyCode::Esc if state.pending_confirm.is_some() => {
-                        if let Some(ref c) = state.pending_confirm {
-                            if let ConfirmAction::SendMessage { ref message } = c.action {
-                                state.input = message.clone();
-                                state.cursor_pos = state.input.len();
-                            }
-                        }
-                        state.pending_confirm = None;
-                        commands::push_cancelled_message(state);
+                        dismiss_confirm(state);
                     }
                     KeyCode::Char('d')
                         if state.pending_confirm.is_some()
@@ -348,13 +377,27 @@ async fn run_loop(
                     }
 
                     // ── 会话管理 ──
-                    KeyCode::Char('n')
-                        if key.modifiers.contains(KeyModifiers::CONTROL)
-                            && state.pending_confirm.is_none() =>
+                    _ if state
+                        .keybindings
+                        .is("toggle_sidebar", key.code, key.modifiers)
+                        && state.pending_confirm.is_none() =>
+                    {
+                        state.sidebar_open = !state.sidebar_open;
+                        if state.sidebar_open {
+                            state.session_list = Session::list();
+                            state.sidebar_idx = state
+                                .session_list
+                                .iter()
+                                .position(|s| s.id == state.session.id)
+                                .unwrap_or(0);
+                        }
+                    }
+                    _ if state.keybindings.is("new_session", key.code, key.modifiers)
+                        && state.pending_confirm.is_none() =>
                     {
                         commands::save_session(state);
                         state.session = Session::new(Session::auto_name());
-                        state.messages.clear();
+                        Arc::make_mut(&mut state.messages).clear();
                         state.stream_buffer.clear();
                         state.chat_scroll = 0;
                         state.total_input_tokens = 0;
@@ -364,7 +407,12 @@ async fn run_loop(
                         state.total_cost = 0.0;
                         state.session_list = Session::list();
                     }
-                    KeyCode::F(2) if !state.generating && state.pending_confirm.is_none() => {
+                    _ if state
+                        .keybindings
+                        .is("next_session", key.code, key.modifiers)
+                        && !state.generating
+                        && state.pending_confirm.is_none() =>
+                    {
                         commands::save_session(state);
                         state.session_list = Session::list();
                         if state.session_list.len() > 1 {
@@ -377,7 +425,7 @@ async fn run_loop(
                             let next_id = state.session_list[next_idx].id.clone();
                             if let Ok(s) = Session::load(&next_id) {
                                 log::info!("切换会话: {} → {}", state.session.id, next_id);
-                                state.messages = s.messages.clone();
+                                state.messages = Arc::clone(&s.messages);
                                 state.total_input_tokens = s.total_input_tokens;
                                 state.total_output_tokens = s.total_output_tokens;
                                 state.total_cache_creation_tokens = s.total_cache_creation_tokens;
@@ -390,8 +438,31 @@ async fn run_loop(
                         }
                     }
 
+                    // ── 撤回最后一条对话 ──
+                    _ if state.keybindings.is("undo", key.code, key.modifiers)
+                        && state.pending_confirm.is_none()
+                        && !state.generating
+                        && !state.search_active
+                        && state.messages.len() >= 2 =>
+                    {
+                        let last = state.messages.last().expect("messages non-empty");
+                        let second_last = state
+                            .messages
+                            .get(state.messages.len() - 2)
+                            .expect("at least 2 messages");
+                        if second_last.role == "user" && last.role == "assistant" {
+                            let user_msg = second_last.content.as_str().to_string();
+                            Arc::make_mut(&mut state.messages).pop(); // assistant
+                            Arc::make_mut(&mut state.messages).pop(); // user
+                            state.input = user_msg;
+                            state.cursor_pos = state.input.len();
+                            state.copy_status = Some("已撤回".into());
+                            state.chat_scroll = 0;
+                        }
+                    }
+
                     // ── 退出 ──
-                    KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    _ if state.keybindings.is("quit", key.code, key.modifiers) => {
                         if !state.messages.is_empty() && state.pending_confirm.is_none() {
                             state.pending_confirm = Some(ConfirmState {
                                 action: ConfirmAction::Quit,
@@ -404,33 +475,20 @@ async fn run_loop(
                     }
 
                     // ── 中断生成 ──
-                    KeyCode::Char('c')
-                        if key.modifiers.contains(KeyModifiers::CONTROL)
-                            && state.pending_confirm.is_none()
-                            && state.generating =>
+                    _ if state.keybindings.is("cancel", key.code, key.modifiers)
+                        && state.pending_confirm.is_none()
+                        && state.generating =>
                     {
-                        if let Some(cancel_tx) = state.cancel_tx.take() {
-                            let _ = cancel_tx.send(());
-                        }
-                        state.generating = false;
-                        if !state.stream_buffer.is_empty() {
-                            state.messages.push(ChatMessage {
-                                role: "assistant".to_string(),
-                                content: Content::text(state.stream_buffer.clone()),
-                                cache_control: None,
-                            });
-                            state.stream_buffer.clear();
-                        }
+                        cancel_generation(state);
                     }
 
                     // ── 粘贴 ──
-                    KeyCode::Char('v')
-                        if key.modifiers.contains(KeyModifiers::CONTROL)
-                            && !state.generating
-                            && !state.search_active
-                            && state.pending_confirm.is_none() =>
+                    _ if state.keybindings.is("paste", key.code, key.modifiers)
+                        && !state.generating
+                        && !state.search_active
+                        && state.pending_confirm.is_none() =>
                     {
-                        match cli_clipboard::get_contents() {
+                        match arboard::Clipboard::new().and_then(|mut c| c.get_text()) {
                             Ok(text) => {
                                 state.input.insert_str(state.cursor_pos, &text);
                                 state.cursor_pos += text.len();
@@ -443,11 +501,10 @@ async fn run_loop(
                     }
 
                     // ── 搜索 ──
-                    KeyCode::Char('f')
-                        if key.modifiers.contains(KeyModifiers::CONTROL)
-                            && state.pending_confirm.is_none()
-                            && !state.generating
-                            && !state.search_active =>
+                    _ if state.keybindings.is("search", key.code, key.modifiers)
+                        && state.pending_confirm.is_none()
+                        && !state.generating
+                        && !state.search_active =>
                     {
                         state.search_active = true;
                         state.search_query.clear();
@@ -456,13 +513,14 @@ async fn run_loop(
                     }
 
                     // ── 复制代码块 ──
-                    KeyCode::Char('y')
-                        if key.modifiers.contains(KeyModifiers::CONTROL)
-                            && state.pending_confirm.is_none() =>
+                    _ if state.keybindings.is("copy_code", key.code, key.modifiers)
+                        && state.pending_confirm.is_none() =>
                     {
                         commands::collect_code_blocks(state);
                         if let Some((lang, content)) = state.code_blocks.last() {
-                            match cli_clipboard::set_contents(content.clone()) {
+                            match arboard::Clipboard::new()
+                                .and_then(|mut c| c.set_text(content.clone()))
+                            {
                                 Ok(()) => {
                                     state.copy_status = Some(format!(
                                         "已复制 {} 代码块 ({} 行)",
@@ -479,25 +537,17 @@ async fn run_loop(
                         }
                     }
 
-                    // ── Esc: 退出搜索 / 中断生成 ──
+                    // ── Esc: 退出搜索 / 中断生成 / 关闭侧边栏 ──
+                    KeyCode::Esc if state.sidebar_open => {
+                        state.sidebar_open = false;
+                    }
                     KeyCode::Esc if state.search_active => {
                         state.search_active = false;
                         state.search_query.clear();
                         state.search_matches.clear();
                     }
                     KeyCode::Esc if state.generating => {
-                        if let Some(cancel_tx) = state.cancel_tx.take() {
-                            let _ = cancel_tx.send(());
-                        }
-                        state.generating = false;
-                        if !state.stream_buffer.is_empty() {
-                            state.messages.push(ChatMessage {
-                                role: "assistant".to_string(),
-                                content: Content::text(state.stream_buffer.clone()),
-                                cache_control: None,
-                            });
-                            state.stream_buffer.clear();
-                        }
+                        cancel_generation(state);
                     }
 
                     // ── 搜索模式 ──
@@ -532,16 +582,17 @@ async fn run_loop(
                     KeyCode::PageDown if !state.generating && !state.search_active => {
                         state.chat_scroll = state.chat_scroll.saturating_sub(10);
                     }
-                    KeyCode::Home if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    KeyCode::Home
+                        if state.keybindings.is("scroll_top", key.code, key.modifiers) =>
+                    {
                         state.chat_scroll = 0;
                     }
 
                     // ── 发送消息 ──
-                    KeyCode::Enter
-                        if key.modifiers.contains(KeyModifiers::CONTROL)
-                            && state.pending_confirm.is_none()
-                            && !state.input.is_empty()
-                            && !state.generating =>
+                    _ if state.keybindings.is("send", key.code, key.modifiers)
+                        && state.pending_confirm.is_none()
+                        && !state.input.is_empty()
+                        && !state.generating =>
                     {
                         if !state.input.starts_with('/') && state.input.lines().count() > 5 {
                             let msg = state.input.clone();
@@ -570,7 +621,7 @@ async fn run_loop(
                             let args = parts_iter.next().unwrap_or("").to_string();
                             commands::handle_command(state, client, token_tx, &cmd, &args);
                         } else {
-                            state.messages.push(ChatMessage {
+                            Arc::make_mut(&mut state.messages).push(ChatMessage {
                                 role: "user".to_string(),
                                 content: Content::text(user_msg),
                                 cache_control: None,
@@ -579,9 +630,8 @@ async fn run_loop(
                             commands::maybe_truncate_messages(state);
                             if state.messages.len() >= MESSAGE_WARN_THRESHOLD {
                                 state.error_message = Some(format!(
-                                    "消息数 {}/{}，接近上限",
-                                    state.messages.len(),
-                                    MAX_MESSAGES
+                                    "消息数 {}，旧消息已自动压缩为摘要",
+                                    state.messages.len()
                                 ));
                             }
 
@@ -620,22 +670,59 @@ async fn run_loop(
                         state.input.remove(state.cursor_pos);
                         commands::update_hint_lines(state);
                     }
-                    KeyCode::Char('a')
-                        if key.modifiers.contains(KeyModifiers::CONTROL)
-                            && !state.generating
-                            && !state.search_active =>
+                    _ if state.keybindings.is("cursor_home", key.code, key.modifiers)
+                        && !state.generating
+                        && !state.search_active =>
                     {
                         state.cursor_pos = 0;
                     }
                     KeyCode::End if !state.generating && !state.search_active => {
                         state.cursor_pos = state.input.len();
                     }
-                    KeyCode::Char('e')
-                        if key.modifiers.contains(KeyModifiers::CONTROL)
-                            && !state.generating
-                            && !state.search_active =>
+                    _ if state.keybindings.is("cursor_end", key.code, key.modifiers)
+                        && !state.generating
+                        && !state.search_active =>
                     {
                         state.cursor_pos = state.input.len();
+                    }
+
+                    // ── 侧边栏导航 ──
+                    KeyCode::Up
+                        if state.sidebar_open
+                            && !state.session_list.is_empty()
+                            && state.sidebar_idx > 0 =>
+                    {
+                        state.sidebar_idx -= 1;
+                    }
+                    KeyCode::Down
+                        if state.sidebar_open
+                            && !state.session_list.is_empty()
+                            && state.sidebar_idx + 1 < state.session_list.len() =>
+                    {
+                        state.sidebar_idx += 1;
+                    }
+                    KeyCode::Enter if state.sidebar_open && !state.session_list.is_empty() => {
+                        let selected_id = state.session_list[state.sidebar_idx].id.clone();
+                        if selected_id != state.session.id {
+                            commands::save_session(state);
+                            if let Ok(s) = Session::load(&selected_id) {
+                                log::info!(
+                                    "侧边栏切换会话: {} → {}",
+                                    state.session.id,
+                                    selected_id
+                                );
+                                state.messages = Arc::clone(&s.messages);
+                                state.total_input_tokens = s.total_input_tokens;
+                                state.total_output_tokens = s.total_output_tokens;
+                                state.total_cache_creation_tokens = s.total_cache_creation_tokens;
+                                state.total_cache_read_tokens = s.total_cache_read_tokens;
+                                state.total_cost = s.total_cost;
+                                state.session = s;
+                                state.stream_buffer.clear();
+                                state.chat_scroll = 0;
+                            }
+                        }
+                        state.sidebar_open = false;
                     }
 
                     // ── 输入历史 ──
@@ -644,7 +731,11 @@ async fn run_loop(
                             None => {
                                 state.input_draft = state.input.clone();
                                 state.history_idx = Some(state.input_history.len() - 1);
-                                state.input = state.input_history.last().unwrap().clone();
+                                state.input = state
+                                    .input_history
+                                    .last()
+                                    .expect("history non-empty")
+                                    .clone();
                                 state.cursor_pos = state.input.len();
                             }
                             Some(0) => {}
@@ -704,9 +795,33 @@ async fn run_loop(
     Ok(())
 }
 
+fn cancel_generation(state: &mut AppState) {
+    if let Some(cancel_tx) = state.cancel_tx.take() {
+        let _ = cancel_tx.send(());
+    }
+    state.generating = false;
+    if !state.stream_buffer.is_empty() {
+        Arc::make_mut(&mut state.messages).push(ChatMessage {
+            role: "assistant".to_string(),
+            content: Content::text(mem::take(&mut state.stream_buffer)),
+            cache_control: None,
+        });
+    }
+}
+
+fn dismiss_confirm(state: &mut AppState) {
+    if let Some(ref c) = state.pending_confirm {
+        if let ConfirmAction::SendMessage { ref message } = c.action {
+            state.input = message.clone();
+            state.cursor_pos = state.input.len();
+        }
+    }
+    state.pending_confirm = None;
+    commands::push_cancelled_message(state);
+}
+
 fn calculate_cost(state: &AppState) -> f64 {
     let input_cost = state.total_input_tokens as f64 / 1_000_000.0 * state.config.input_price();
-    let output_cost =
-        state.total_output_tokens as f64 / 1_000_000.0 * state.config.output_price();
+    let output_cost = state.total_output_tokens as f64 / 1_000_000.0 * state.config.output_price();
     input_cost + output_cost
 }
