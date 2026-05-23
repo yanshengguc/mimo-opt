@@ -245,7 +245,7 @@ pub fn handle_export_command(state: &mut AppState, args: &str) {
             Arc::make_mut(&mut state.messages).push(ChatMessage {
                 role: "assistant".to_string(),
                 content: Content::text(format!(
-                    "✓ 已导出到 {} ({} 条消息, {} B)",
+                    "[OK] 已导出到 {} ({} 条消息, {} B)",
                     path, msg_count, md_len
                 )),
                 cache_control: None,

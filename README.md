@@ -1,14 +1,23 @@
 # MiMo-OPT
 
-> **芒果猫** · 终端 AI 编程助手 · v0.5.0
+> **芒果猫** · 多 Provider AI 聊天工具 · CLI + 桌面端 · v1.0.0
 
-Rust 编写的多 Provider 终端 AI 聊天工具。接上 API Key 就能用，单二进制 ~5MB，零运行时依赖。
+Rust 编写的多 Provider AI 聊天工具，提供 **终端 CLI** 和 **Tauri 桌面端** 两种形态。接上 API Key 就能用，零运行时依赖。
 
-支持 **DeepSeek / MiMo / OpenAI / 自定义 OpenAI 兼容 API**，开箱即用。
+支持 **MiMo / DeepSeek / OpenAI / 自定义 OpenAI 兼容 API**，开箱即用。
 
-> 项目仍在积极开发中，后续更新桌面端（Tauri）。遇到 Bug 或有优化建议，欢迎联系作者 QQ：**2391859666**
+> 遇到 Bug 或有优化建议，欢迎联系作者 QQ：**2391859666**
 
 ## 特性
+
+### 双形态：CLI + 桌面端
+
+| 形态 | 技术 | 适用场景 |
+|------|------|----------|
+| **CLI 终端版** | ratatui TUI | SSH 远程服务器、轻量终端、脚本集成 |
+| **桌面端** | Tauri v1 | 图形界面、拖拽上传、文件保存对话框、主题切换 |
+
+两者共享核心逻辑（API 客户端、配置、会话、缓存等），功能一致，体验不同。
 
 ### 多 Provider 支持
 
@@ -98,15 +107,136 @@ DeepSeek Provider 启动时自动查询余额，标题栏显示 `¥X.XX`，余�
 - **temperature / top_p**：config 可选透传，控制模型输出创造性
 - **回复通知**：AI 回复完成终端响铃 `\x07`
 - **/edit diff 预览**：确认弹窗红删绿增，心里有底再写入
-- **syntect 异步加载**：首屏不阻塞，启动秒开
 - **UTF-8 安全**：正确处理跨 chunk 多字节字符，中文/emoji 不断裂
-- **单二进制**：~5MB，SSH 到远程服务器直接用
+- **单二进制（CLI）**：~5MB，SSH 到远程服务器直接用
 - **0 clippy warnings**：代码质量基线
 - **Ctrl+F 搜索**、**长消息确认**、**终端尺寸检查**
 
+### 桌面端专属
+
+- **拖拽上传文件**：将文件直接拖入聊天区域，自动读取并请求 AI 分析
+- **文件保存对话框**：导出会话时弹出系统原生对话框选择保存位置
+- **主题卡片预览**：设置中 3 款主题带可视化缩略图，点击即时切换
+- **会话重命名**：双击侧边栏会话名称即可修改
+- **项目结构查看**：侧边栏按钮一键查看当前目录文件树
+- **联网搜索按钮**：输入框旁搜索图标，输入关键词直接搜索
+- **停止生成**：红色停止按钮真正取消后端 API 请求（节省 token）
+- **零网络依赖**：所有 JS/CSS 库本地化，断网可用
+- **Windows 权限保护**：配置文件自动限制为仅当前用户可读写
+
 ## 快速开始
 
-### 1. 下载
+### 桌面端（推荐）
+
+#### 1. 构建
+
+```bash
+git clone https://github.com/yanshengguc/mimo-opt.git
+cd mimo-opt
+cargo build --release --bin mimo-opt-desktop
+```
+
+构建完成后，直接双击 `start-desktop.bat` 即可启动（Windows）。
+
+#### 2. 配置 API Key
+
+编辑配置文件填入密钥：
+
+| 平台 | 配置路径 |
+|------|----------|
+| Windows | `%APPDATA%\mimo-opt\config.json` |
+| Linux/macOS | `~/.config/mimo-opt/config.json` |
+
+首次运行无配置会提示找不到 Key。配置格式见下方"配置参考"。
+
+#### 3. 启动
+
+```bash
+# 方法 1：双击 start-desktop.bat（Windows）
+# 方法 2：命令行
+cargo run --bin mimo-opt-desktop
+```
+
+### 桌面端使用说明
+
+#### 界面布局
+
+```
++------------------+------------------------------------------+
+|    侧边栏         |              顶栏（操作按钮）              |
+|  - 会话列表       |  [搜索] [上传] [导出] [清空] Provider Model|
+|  - 项目结构按钮   |------------------------------------------|
+|  - 设置按钮       |              聊天消息区域                  |
+|                  |          （支持 Markdown + 代码高亮）       |
+|                  |------------------------------------------|
+|                  |  [附件] [搜索] | 输入框 | [发送] [停止]    |
++------------------+------------------------------------------+
+```
+
+#### 常用操作
+
+| 操作 | 方式 |
+|------|------|
+| 发送消息 | 输入后按 `Enter`，换行用 `Shift+Enter` |
+| 新建会话 | `Ctrl+N` 或侧边栏 `+` 按钮 |
+| 切换会话 | 点击侧边栏会话名称 |
+| 重命名会话 | 双击侧边栏会话名称，输入新名称后回车 |
+| 删除会话 | 右键侧边栏会话名称，确认删除 |
+| 上传文件 | 点击输入框旁的附件图标，或顶部上传按钮，或直接拖拽文件到聊天区域 |
+| 联网搜索 | 输入框旁搜索按钮，或输入 `/search 关键词` |
+| 搜索对话 | `Ctrl+F` 打开搜索栏，`Enter` 跳转下一个 |
+| 导出会话 | 点击顶部下载按钮，选择保存位置（Markdown 格式） |
+| 清空对话 | 点击顶部垃圾桶按钮，确认后清空 |
+| 停止生成 | 点击红色停止按钮或按 `Esc` |
+| 撤回上条 | `Ctrl+Z`，恢复用户消息到输入框 |
+| 查看项目结构 | 点击侧边栏底部的文件夹按钮 |
+| 切换主题 | 设置 > 主题 标签页，点击主题卡片即时切换 |
+
+#### 设置面板（齿轮图标）
+
+4 个标签页：
+
+| 标签 | 内容 |
+|------|------|
+| 基本 | API Provider 下拉选择、API Key（密码框）、模型选择、Base URL |
+| 主题 | Tokyo Night / Nord / Catppuccin 三款主题卡片，点击即时切换 |
+| 高级 | Max Tokens、Temperature、Top P、代理 URL |
+| 技能 | 技能列表增删，名称 + 命令 + 描述 |
+
+#### 快捷键
+
+| 快捷键 | 功能 |
+|--------|------|
+| `Enter` | 发送消息 |
+| `Shift+Enter` | 换行 |
+| `Ctrl+N` | 新建会话 |
+| `Ctrl+B` | 显示/隐藏侧边栏 |
+| `Ctrl+F` | 搜索对话 |
+| `Ctrl+Z` | 撤回上条对话 |
+| `Esc` | 关闭弹窗 / 停止生成 |
+| `↑/↓` | 浏览输入历史 |
+
+#### 命令（输入框输入 `/` 开头）
+
+| 命令 | 功能 |
+|------|------|
+| `/help` | 显示帮助 |
+| `/clear` | 清空对话 |
+| `/search <关键词>` | 联网搜索 |
+| `/model [name]` | 查看/切换模型 |
+| `/provider [name]` | 查看/切换 Provider |
+| `/theme [name]` | 查看/切换主题 |
+| `/read <path>` | 读取文件内容注入对话 |
+| `/export` | 导出会话为 Markdown |
+| `/skills` | 查看技能列表 |
+| `/addskill <name> <cmd>` | 添加技能 |
+| `/rmskill <name>` | 删除技能 |
+
+---
+
+### CLI 终端版
+
+#### 1. 下载
 
 前往 [Releases](https://github.com/yanshengguc/mimo-opt/releases) 下载预编译版本：
 
@@ -125,7 +255,7 @@ cd mimo-opt
 cargo build --release
 ```
 
-### 2. 获取 API Key
+#### 2. 获取 API Key
 
 任选一个 Provider：
 
@@ -133,7 +263,7 @@ cargo build --release
 - [小米 MiMo](https://platform.xiaomimimo.com/#/console/subscription) — Token Plan 或普通 API
 - [OpenAI](https://platform.openai.com/api-keys) — GPT-4o 系列
 
-### 3. 首次运行
+#### 3. 首次运行
 
 ```bash
 ./target/release/mimo-opt
@@ -141,7 +271,7 @@ cargo build --release
 
 首次运行无配置时会展示 5 种 Provider 的配置引导，编辑 `~/.config/mimo-opt/config.json` 填入密钥后重新运行即可。
 
-### 4. 配置参考
+#### 4. 配置参考
 
 配置文件位于 `~/.config/mimo-opt/config.json`（Windows: `%APPDATA%\mimo-opt\config.json`）。
 
@@ -319,38 +449,61 @@ cargo build --release
 | 组件 | 选型 |
 |------|------|
 | 语言 | Rust 2021 edition |
+| 桌面框架 | Tauri v1（Rust 后端 + Web 前端） |
 | TUI 框架 | ratatui 0.29 + crossterm 0.28 |
 | 异步运行时 | tokio (full features) |
 | HTTP 客户端 | reqwest (json + stream) |
 | 序列化 | serde + serde_json |
-| 语法高亮 | syntect 5 (default-fancy) |
-| 剪贴板 | cli-clipboard 0.4 |
+| 语法高亮 | syntect 5 (CLI) / highlight.js 11.9 (桌面端) |
+| Markdown 渲染 | syntect (CLI) / marked.js (桌面端) |
+| 剪贴板 | arboard 3 |
 | 日志 | log + env_logger |
-| 终端安全 | scopeguard |
 | Unicode 宽度 | unicode-width 0.2 |
 
 ## 项目结构
 
 ```
 src/
-├── main.rs           # 入口，首次运行引导 5 种 Provider 方案
-├── config.rs         # 配置管理（Config/ProviderPreset/WebSearchConfig，JSON 读写 0600）
-├── app.rs            # AppState + 事件循环 + 键盘分发 + Logo 展示
-├── commands.rs       # 命令调度 + 文件操作 + 确认弹窗 + 搜索 + 技能 + /search
-├── prompt.rs         # System prompt 构建 + 缓存断点 v3 + 日期 preamble
+├── main.rs           # CLI 入口
+├── desktop.rs        # 桌面端入口（Tauri）
+├── lib.rs            # 库 crate，导出所有模块
+├── tauri_cmds.rs     # 22 个 Tauri 命令 + AppState + 流式对话
+├── config.rs         # 配置管理（Config/ProviderPreset/WebSearchConfig）
+├── app.rs            # CLI AppState + 事件循环 + 键盘分发 + Logo
+├── commands/
+│   ├── mod.rs        # CLI 命令调度 + 搜索 + 技能 + /search
+│   └── file_cmd.rs   # CLI 文件操作命令
+├── prompt.rs         # System prompt 构建 + 缓存断点 + 日期 preamble
 ├── scanner.rs        # 项目文件树扫描
-├── search.rs         # DDG/DeepSeek 联网搜索 + HTML 解析
-├── file_ops.rs       # 文件 read/write/edit + 路径沙箱 + 自动备份 + diff 预览
+├── search.rs         # DDG 联网搜索 + HTML 解析
+├── file_ops.rs       # 文件 read/write/edit + 路径沙箱 + 自动备份
 ├── session.rs        # 会话持久化（多会话 JSON 存储 + 自动命名）
-├── util.rs           # now_secs() / get_cwd() / estimate_tokens()
+├── keybindings.rs    # 可配置快捷键系统
+├── pipe.rs           # Shell 管道集成
+├── util.rs           # 工具函数（mask_key / restrict_permissions / estimate_tokens）
 ├── api/
-│   ├── mod.rs        # MiMoClient（流式 SSE + 重试 + RwLock 热切换 + web_search）
-│   └── types.rs      # API 类型（Content enum + Anthropic/OpenAI 双格式 + temperature/top_p）
-└── ui/
-    ├── mod.rs        # 模块导出
+│   ├── mod.rs        # MiMoClient（流式 SSE + 重试 + RwLock 热切换）
+│   └── types.rs      # API 类型（Anthropic/OpenAI 双格式）
+└── ui/               # CLI 界面
+    ├── mod.rs
     ├── logo.rs       # 芒果猫 ANSI 色块启动 Logo
     ├── theme.rs      # ThemeColors + 3 套色板
-    └── draw.rs       # 界面渲染（自适应布局 + Markdown + 高亮 + diff + 费用预估）
+    └── draw/
+        ├── mod.rs    # 界面渲染
+        └── modal.rs  # 确认弹窗
+
+frontend/             # 桌面端前端
+├── index.html        # 页面结构（侧边栏 + 聊天 + 设置弹窗）
+├── style.css         # 样式（3 套主题 CSS 变量）
+├── app.js            # 前端逻辑（流式渲染 + 会话管理 + 命令系统）
+└── lib/              # 本地依赖（零 CDN）
+    ├── marked.min.js
+    ├── hljs-core.min.js + 15 个语言模块
+    └── *.css         # tokyo-night-dark / nord / catppuccin-mocha
+
+start-desktop.bat     # 双击启动桌面端（Windows）
+tauri.conf.json       # Tauri 配置
+build.rs              # Tauri 构建脚本
 ```
 
 ## 评分 & 路线图

@@ -36,6 +36,46 @@ pub fn format_cost_estimate(tokens: usize, input_price_per_mtok: f64) -> String 
     }
 }
 
+/// 限制文件/目录权限：仅当前用户可读写
+pub fn restrict_permissions(path: &std::path::Path, is_dir: bool) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if is_dir { 0o700 } else { 0o600 };
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+    }
+    #[cfg(windows)]
+    {
+        let username = match std::env::var("USERNAME") {
+            Ok(u) => u,
+            Err(_) => return,
+        };
+        let grant = if is_dir {
+            format!("{}:(OI)(CI)F", username)
+        } else {
+            format!("{}:F", username)
+        };
+        let _ = std::process::Command::new("icacls")
+            .arg(path.as_os_str())
+            .args(["/inheritance:r", "/grant:r"])
+            .arg(&grant)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+}
+
+/// 掩码 API key：显示前4后4位，中间用 ...
+pub fn mask_key(key: &str) -> String {
+    if key.is_empty() {
+        return "(empty)".into();
+    }
+    if key.len() <= 8 {
+        return "***".into();
+    }
+    format!("{}...{}", &key[..4], &key[key.len() - 4..])
+}
+
 /// 将 Unix 时间戳格式化为相对时间（刚刚 / X分钟 / X小时 / X天）
 pub fn format_age(timestamp: u64) -> String {
     let now = now_secs();

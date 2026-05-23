@@ -1,0 +1,10 @@
+{
+  "name": "mimo-opt",
+  "version": "1.0.0",
+  "scripts": {
+    "desktop": "cargo run --bin mimo-opt-desktop",
+    "cli": "cargo run --bin mimo-opt",
+    "build:desktop": "cargo build --release --bin mimo-opt-desktop",
+    "build:cli": "cargo build --release --bin mimo-opt"
+  }
+}

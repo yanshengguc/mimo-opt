@@ -3,6 +3,8 @@
 *.swo
 *~
 .DS_Store
+node_modules/
+package-lock.json
 
 # 防止意外提交敏感信息
 *.env

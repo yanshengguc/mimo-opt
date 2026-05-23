@@ -185,7 +185,7 @@ pub fn draw(f: &mut Frame, state: &AppState, theme: &ThemeColors) {
 }
 
 fn draw_title_bar(f: &mut Frame, area: Rect, state: &AppState, t: &ThemeColors) {
-    let model_text = format!(" ⚡ {} ", state.config.model);
+    let model_text = format!(" M:{} ", state.config.model);
 
     let session_name = &state.session.name;
     let short_name = if session_name.len() > 20 {
@@ -331,7 +331,7 @@ fn draw_input_area(f: &mut Frame, area: Rect, state: &AppState, t: &ThemeColors)
     }
 
     let hint = if state.search_active {
-        "Enter ↵  Esc ✕"
+        "Enter ↵  Esc X"
     } else if state.generating {
         "Esc"
     } else {
@@ -384,19 +384,19 @@ fn draw_input_area(f: &mut Frame, area: Rect, state: &AppState, t: &ThemeColors)
 
 fn draw_status_bar(f: &mut Frame, area: Rect, state: &AppState, t: &ThemeColors) {
     let total_tok = state.total_input_tokens + state.total_output_tokens;
-    let token_text = format!(" ◉ {:.1}K tok ", total_tok as f64 / 1000.0);
+    let token_text = format!(" * {:.1}K tok ", total_tok as f64 / 1000.0);
     let io_text = format!(
         " ↓{} ↑{} ",
         state.total_input_tokens, state.total_output_tokens
     );
     let cost_text = format!(" ￥{:.4} ", state.total_cost);
 
-    let msg_text = format!(" ✉ {} ", state.messages.len());
+    let msg_text = format!(" Msg:{} ", state.messages.len());
 
     let effective_input = state.total_input_tokens + state.total_cache_read_tokens;
     let cache_text = if effective_input > 0 {
         let hit_rate = state.total_cache_read_tokens as f64 / effective_input as f64 * 100.0;
-        format!(" ♻ {:.0}% ", hit_rate)
+        format!(" Cache:{:.0}% ", hit_rate)
     } else {
         String::new()
     };
@@ -424,14 +424,14 @@ fn draw_status_bar(f: &mut Frame, area: Rect, state: &AppState, t: &ThemeColors)
     // 复制状态
     if let Some(ref copy_msg) = state.copy_status {
         spans.push(Span::styled(
-            format!(" ✓ {}", copy_msg),
+            format!(" OK:{}", copy_msg),
             Style::default().fg(t.success),
         ));
     }
 
     // 错误信息
     if let Some(ref err) = state.error_message {
-        let err_text = format!(" ✗ {} ", err);
+        let err_text = format!(" ERR:{} ", err);
         let total_width = area.width as usize;
         let content_len: usize = spans
             .iter()

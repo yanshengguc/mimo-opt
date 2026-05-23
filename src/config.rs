@@ -84,7 +84,7 @@ impl std::fmt::Debug for Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Config")
             .field("provider", &self.provider)
-            .field("api_key", &mask_key(&self.api_key))
+            .field("api_key", &crate::util::mask_key(&self.api_key))
             .field("base_url", &self.base_url)
             .field("model", &self.model)
             .field("auth_type", &self.auth_type)
@@ -98,16 +98,6 @@ impl std::fmt::Debug for Config {
             .field("skills", &self.skills)
             .finish()
     }
-}
-
-fn mask_key(key: &str) -> String {
-    if key.is_empty() {
-        return "(empty)".into();
-    }
-    if key.len() <= 8 {
-        return "***".into();
-    }
-    format!("{}...{}", &key[..4], &key[key.len() - 4..])
 }
 
 /// Per-model pricing info
@@ -445,11 +435,7 @@ impl Config {
         };
         let content = serde_json::to_string_pretty(&raw)?;
         std::fs::write(&path, content)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        }
+        crate::util::restrict_permissions(&path, false);
         Ok(())
     }
 }
@@ -482,6 +468,7 @@ struct WebSearchConfigRaw {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::mask_key;
 
     #[test]
     fn mask_key_empty() {

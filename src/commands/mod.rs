@@ -144,7 +144,7 @@ pub fn handle_command(
                 };
                 state.skills.insert(name.clone(), entry);
                 save_skills(state);
-                push_assistant_msg(state, format!("✓ 已添加 /{} → {}", name, cmd));
+                push_assistant_msg(state, format!("[OK] 已添加 /{} → {}", name, cmd));
             }
         }
         "rmskill" => {
@@ -152,7 +152,7 @@ pub fn handle_command(
                 state.error_message = Some("用法: /rmskill <name>".into());
             } else if state.skills.remove(args).is_some() {
                 save_skills(state);
-                push_assistant_msg(state, format!("✓ 已删除 /{}", args));
+                push_assistant_msg(state, format!("[OK] 已删除 /{}", args));
             } else {
                 state.error_message = Some(format!("技能 /{} 不存在", args));
             }
@@ -197,14 +197,14 @@ pub fn handle_command(
                     push_assistant_msg(
                         state,
                         format!(
-                            "✓ 已切换到 {} ({})\n  ↓¥{}/Mtok ↑¥{}/Mtok",
+                            "[OK] 已切换到 {} ({})\n  ↓¥{}/Mtok ↑¥{}/Mtok",
                             args, mi.desc, mi.input_price_per_mtok, mi.output_price_per_mtok
                         ),
                     );
                 } else {
                     push_assistant_msg(
                         state,
-                        format!("✓ 模型已切换为 {} (未知模型，费用按默认估算)", args),
+                        format!("[OK] 模型已切换为 {} (未知模型，费用按默认估算)", args),
                     );
                 }
             }
@@ -226,7 +226,7 @@ pub fn handle_command(
             } else if crate::ui::theme_names().contains(&args) {
                 state.config.theme = args.to_string();
                 state.config.save().ok();
-                push_assistant_msg(state, format!("✓ 主题已切换为 {}", args));
+                push_assistant_msg(state, format!("[OK] 主题已切换为 {}", args));
             } else {
                 state.error_message = Some(format!(
                     "未知主题: {}。可用: {}",
@@ -294,7 +294,7 @@ pub fn handle_provider_command(state: &mut AppState, client: &Arc<MiMoClient>, a
         push_assistant_msg(
             state,
             format!(
-                "✓ 已切换到 {} ({})\nbase_url: {}\nmodel: {}",
+                "[OK] 已切换到 {} ({})\nbase_url: {}\nmodel: {}",
                 preset.name,
                 preset.default_model().name,
                 preset.base_url,
@@ -470,7 +470,7 @@ fn handle_search_command(
 
     log::info!("联网搜索: {}", args);
 
-    push_assistant_msg(state, format!("🔍 正在搜索: {} ...", args));
+    push_assistant_msg(state, format!("[搜索] 正在搜索: {} ...", args));
 
     let query = args.to_string();
     let web_cfg = state.config.web_search.clone();
@@ -568,7 +568,7 @@ pub fn execute_confirm(
             };
             match file_ops::write_file(&full_path, &code) {
                 Ok(msg) => {
-                    push_assistant_msg(state, format!("✓ {} (from {} code block)", msg, lang));
+                    push_assistant_msg(state, format!("[OK] {} (from {} code block)", msg, lang));
                     send_to_mimo(
                         state,
                         client,
@@ -591,7 +591,7 @@ pub fn execute_confirm(
             };
             match file_ops::apply_edit(&full_path, &old, &new) {
                 Ok(msg) => {
-                    push_assistant_msg(state, format!("✓ {}", msg));
+                    push_assistant_msg(state, format!("[OK] {}", msg));
                     send_to_mimo(
                         state,
                         client,

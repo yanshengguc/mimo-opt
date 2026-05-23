@@ -84,6 +84,12 @@ impl MiMoClient {
         s.model = model;
     }
 
+    /// 运行时更新 API key
+    pub fn set_api_key(&self, key: String) {
+        let mut s = self.settings.write().expect("RwLock poisoned");
+        s.api_key = key;
+    }
+
     /// 运行时更新 provider 设置（重建 endpoint/auth/费率，model 由调用方决定）
     pub fn update_for_provider(
         &self,
@@ -103,6 +109,20 @@ impl MiMoClient {
             "/v1/messages"
         };
         s.messages_url = format!("{}{}", s.base_url, endpoint);
+    }
+
+    /// 获取当前模型的 (input_price, output_price) 元/百万token
+    pub fn get_model_prices(&self) -> (f64, f64) {
+        let model = {
+            let s = self.settings.read().expect("RwLock poisoned");
+            s.model.clone()
+        };
+        for preset in crate::config::PROVIDERS {
+            if let Some(m) = preset.models.iter().find(|m| m.name == model) {
+                return (m.input_price_per_mtok, m.output_price_per_mtok);
+            }
+        }
+        (2.0, 8.0) // 默认 fallback
     }
 
     /// 根据 auth_type 设置请求头

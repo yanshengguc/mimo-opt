@@ -67,19 +67,11 @@ impl Session {
         let dir = session_dir()?;
         std::fs::create_dir_all(&dir)?;
         log::debug!("保存会话: {} ({} 条消息)", self.id, self.messages.len());
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
-        }
+        crate::util::restrict_permissions(&dir, true);
         let path = dir.join(format!("{}.json", self.id));
         let content = serde_json::to_string_pretty(self)?;
         std::fs::write(&path, content)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        }
+        crate::util::restrict_permissions(&path, false);
         Ok(())
     }
 

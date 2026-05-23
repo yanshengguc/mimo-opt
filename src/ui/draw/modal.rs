@@ -23,11 +23,11 @@ pub fn draw_confirm_modal(f: &mut Frame, confirm: &crate::app::ConfirmState, t: 
     let mut lines: Vec<Line> = Vec::new();
 
     let title = match &confirm.action {
-        ConfirmAction::WriteFile { .. } => " ⚠ 写入确认 ",
-        ConfirmAction::EditFile { .. } => " ⚠ 编辑确认 ",
-        ConfirmAction::SendMessage { .. } => " ⚠ 发送确认 ",
-        ConfirmAction::ClearChat => " ⚠ 清空确认 ",
-        ConfirmAction::Quit => " ⚠ 退出确认 ",
+        ConfirmAction::WriteFile { .. } => " [!] 写入确认 ",
+        ConfirmAction::EditFile { .. } => " [!] 编辑确认 ",
+        ConfirmAction::SendMessage { .. } => " [!] 发送确认 ",
+        ConfirmAction::ClearChat => " [!] 清空确认 ",
+        ConfirmAction::Quit => " [!] 退出确认 ",
     };
     lines.push(Line::from(Span::styled(
         title,

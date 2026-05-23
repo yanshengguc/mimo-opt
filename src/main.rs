@@ -1,37 +1,21 @@
-mod api;
-mod app;
-mod commands;
-mod config;
-mod file_ops;
-mod keybindings;
-mod pipe;
-mod prompt;
-mod scanner;
-mod search;
-mod session;
-mod ui;
-mod util;
+use mimo_opt::{app, config, pipe};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
-    // CLI: mimo-opt [-p|--prompt <text>]
     let args: Vec<String> = std::env::args().collect();
-    let (pipe_mode, prompt_arg) = if args.len() >= 2 && (args[1] == "-p" || args[1] == "--prompt") {
+    let (pipe_mode, prompt_arg) = if args.len() >= 2 && (args[1] == "-p" || args[1] == "--prompt")
+    {
         (true, args.get(2).map(|s| s.as_str()))
     } else {
         (false, None)
     };
 
-    let mut config = config::Config::load()?;
-    log::info!(
-        "配置加载完成 provider={} model={}",
-        config.provider,
-        config.model
-    );
+    let mut cfg = config::Config::load()?;
+    log::info!("配置加载完成 provider={} model={}", cfg.provider, cfg.model);
 
-    if config.api_key.is_empty() {
+    if cfg.api_key.is_empty() {
         if pipe_mode {
             eprintln!("mimo-opt: 未配置 API Key，请先运行交互模式配置");
             std::process::exit(1);
@@ -40,12 +24,12 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(1);
     }
 
-    config.apply_defaults();
+    cfg.apply_defaults();
 
     if pipe_mode {
-        pipe::run_pipe(&config, prompt_arg).await
+        pipe::run_pipe(&cfg, prompt_arg).await
     } else {
-        app::run(config).await
+        app::run(cfg).await
     }
 }
 
@@ -71,30 +55,14 @@ fn print_first_run_guide() {
     eprintln!("  \"auth_type\": \"bearer\"");
     eprintln!("  \"api_format\": \"openai\"");
     eprintln!("  \"base_url\": \"https://api.deepseek.com\"");
-    eprintln!("  \"model\": \"deepseek-chat\"    (或 deepseek-reasoner)");
+    eprintln!("  \"model\": \"deepseek-chat\"");
     eprintln!("  获取密钥: https://platform.deepseek.com/api_keys");
     eprintln!();
     eprintln!("方案三：OpenAI API");
     eprintln!("  \"provider\": \"openai\"");
     eprintln!("  \"api_key\": \"sk-你的密钥\"");
-    eprintln!("  \"auth_type\": \"bearer\"");
-    eprintln!("  \"api_format\": \"openai\"");
-    eprintln!("  \"base_url\": \"https://api.openai.com\"");
-    eprintln!("  \"model\": \"gpt-4o-mini\"");
     eprintln!();
-    eprintln!("方案四：MiMo API（OpenAI 兼容格式）");
+    eprintln!("方案四：自定义 OpenAI 兼容 API");
     eprintln!("  \"provider\": \"custom\"");
     eprintln!("  \"api_key\": \"你的密钥\"");
-    eprintln!("  \"auth_type\": \"bearer\"");
-    eprintln!("  \"api_format\": \"openai\"");
-    eprintln!("  \"base_url\": \"https://api.xiaomimimo.com/v1\"");
-    eprintln!("  获取密钥: https://platform.xiaomimimo.com");
-    eprintln!();
-    eprintln!("方案五：其他 OpenAI 兼容 API（如 GLM、通义千问等）");
-    eprintln!("  \"provider\": \"custom\"");
-    eprintln!("  \"api_key\": \"你的密钥\"");
-    eprintln!("  \"auth_type\": \"bearer\"");
-    eprintln!("  \"api_format\": \"openai\"");
-    eprintln!("  \"base_url\": \"https://api.example.com\"");
-    eprintln!("  \"model\": \"your-model-name\"");
 }
